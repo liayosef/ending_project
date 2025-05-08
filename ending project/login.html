@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>בקרת הורים - כניסה</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="container">
+        <!-- טופס התחברות -->
+        <div id="loginForm" class="form-container">
+            <div class="header">
+                <div class="logo-container">
+                    <div class="logo-circle">🛡️</div>
+                    <h1>בקרת הורים</h1>
+                </div>
+                <p class="subtitle">כניסה לממשק הניהול</p>
+            </div>
+
+            <form id="loginFormElement" method="get" action="dashboard.html">
+                <div class="form-group">
+                    <label for="loginEmail">כתובת אימייל</label>
+                    <input type="email" id="loginEmail" name="loginEmail" required 
+                           placeholder="הכנס כתובת אימייל">
+                </div>
+                <div class="form-group">
+                    <label for="loginPassword">סיסמה</label>
+                    <input type="password" id="loginPassword" name="loginPassword" required 
+                           placeholder="הכנס סיסמה">
+                    <div class="error" id="loginError"></div>
+                </div>
+                <button type="submit" class="primary-btn">התחבר</button>
+            </form>
+            <div class="switch-form" id="showRegister">משתמש חדש? לחץ כאן להרשמה</div>
+        </div>
+
+        <!-- טופס הרשמה -->
+        <div id="registerForm" class="form-container hidden">
+            <div class="header">
+                <div class="logo-container">
+                    <div class="logo-circle">🛡️</div>
+                    <h1>בקרת הורים</h1>
+                </div>
+                <p class="subtitle">הרשמה למערכת</p>
+            </div>
+
+            <form id="registerFormElement">
+                <div class="form-group">
+                    <label for="fullName">שם מלא</label>
+                    <input type="text" id="fullName" name="fullName" required 
+                           placeholder="הכנס שם מלא">
+                </div>
+                <div class="form-group">
+                    <label for="registerEmail">כתובת אימייל</label>
+                    <input type="email" id="registerEmail" name="registerEmail" required 
+                           placeholder="הכנס כתובת אימייל">
+                </div>
+                <div class="form-group">
+                    <label for="registerPassword">סיסמה</label>
+                    <input type="password" id="registerPassword" name="registerPassword" required 
+                           placeholder="הכנס סיסמה (לפחות 6 תווים)">
+                    <div class="error" id="passwordError"></div>
+                </div>
+                <div class="form-group">
+                    <label for="confirmPassword">אימות סיסמה</label>
+                    <input type="password" id="confirmPassword" name="confirmPassword" required 
+                           placeholder="הכנס את הסיסמה שוב">
+                    <div class="error" id="confirmPasswordError"></div>
+                </div>
+                <button type="submit" class="primary-btn">הרשמה</button>
+            </form>
+            <div class="success" id="successMessage"></div>
+            <div class="switch-form" id="showLogin">כבר רשום? לחץ כאן לכניסה</div>
+        </div>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html>

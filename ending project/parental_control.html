@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>בקרת הורים - כניסה</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background-color: #f5f5f5;
+            margin: 0;
+            padding: 0;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+        }
+        .container {
+            background-color: white;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+            padding: 30px;
+            width: 100%;
+            max-width: 400px;
+            text-align: center;
+        }
+        h1 {
+            color: #4a6fa5;
+            margin-bottom: 30px;
+        }
+        .form-container {
+            display: block;
+        }
+        .form-group {
+            margin-bottom: 20px;
+            text-align: right;
+        }
+        label {
+            display: block;
+            font-weight: bold;
+            margin-bottom: 5px;
+        }
+        input {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            font-size: 16px;
+            box-sizing: border-box;
+        }
+        input:focus {
+            border-color: #4a6fa5;
+            outline: none;
+        }
+        button {
+            background-color: #4a6fa5;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            padding: 12px 20px;
+            font-size: 16px;
+            cursor: pointer;
+            width: 100%;
+            transition: background-color 0.3s;
+            margin-bottom: 15px;
+        }
+        button:hover {
+            background-color: #3a5a8a;
+        }
+        .switch-form {
+            color: #4a6fa5;
+            text-decoration: underline;
+            cursor: pointer;
+            font-size: 14px;
+        }
+        .error {
+            color: red;
+            font-size: 14px;
+            margin-top: 5px;
+            text-align: right;
+        }
+        .success {
+            color: green;
+            margin-top: 20px;
+            font-weight: bold;
+        }
+        #loginForm, #registerForm {
+            transition: opacity 0.3s, display 0.3s;
+        }
+        #registerForm {
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- טופס התחברות -->
+        <div id="loginForm" class="form-container">
+            <h1>כניסה למערכת בקרת הורים</h1>
+            <form id="loginFormElement">
+                <div class="form-group">
+                    <label for="loginEmail">כתובת אימייל</label>
+                    <input type="email" id="loginEmail" name="loginEmail" required>
+                </div>
+                <div class="form-group">
+                    <label for="loginPassword">סיסמה</label>
+                    <input type="password" id="loginPassword" name="loginPassword" required>
+                    <div class="error" id="loginError"></div>
+                </div>
+                <button type="submit">כניסה</button>
+            </form>
+            <div class="switch-form" id="showRegister">משתמש חדש? לחץ כאן להרשמה</div>
+        </div>
+
+        <!-- טופס הרשמה -->
+        <div id="registerForm" class="form-container">
+            <h1>הרשמת הורים</h1>
+            <form id="registerFormElement">
+                <div class="form-group">
+                    <label for="fullName">שם מלא</label>
+                    <input type="text" id="fullName" name="fullName" required>
+                </div>
+                <div class="form-group">
+                    <label for="registerEmail">כתובת אימייל</label>
+                    <input type="email" id="registerEmail" name="registerEmail" required>
+                </div>
+                <div class="form-group">
+                    <label for="registerPassword">סיסמה</label>
+                    <input type="password" id="registerPassword" name="registerPassword" required>
+                    <div class="error" id="passwordError"></div>
+                </div>
+                <div class="form-group">
+                    <label for="confirmPassword">אימות סיסמה</label>
+                    <input type="password" id="confirmPassword" name="confirmPassword" required>
+                    <div class="error" id="confirmPasswordError"></div>
+                </div>
+                <button type="submit">הרשמה</button>
+            </form>
+            <div class="success" id="successMessage"></div>
+            <div class="switch-form" id="showLogin">כבר רשום? לחץ כאן לכניסה</div>
+        </div>
+    </div>
+
+    <script>
+        // מעבר בין טפסי התחברות והרשמה
+        document.getElementById('showRegister').addEventListener('click', function() {
+            document.getElementById('loginForm').style.display = 'none';
+            document.getElementById('registerForm').style.display = 'block';
+        });
+
+        document.getElementById('showLogin').addEventListener('click', function() {
+            document.getElementById('registerForm').style.display = 'none';
+            document.getElementById('loginForm').style.display = 'block';
+        });
+
+        // טיפול בטופס התחברות
+        document.getElementById('loginFormElement').addEventListener('submit', function(event) {
+            event.preventDefault();
+
+            const email = document.getElementById('loginEmail').value;
+            const password = document.getElementById('loginPassword').value;
+
+            // בדיקת תקינות בסיסית
+            if (!email || !password) {
+                document.getElementById('loginError').textContent = 'נא למלא את כל השדות';
+                return;
+            }
+
+            // כאן יש לשלוח את הנתונים לשרת
+            // בהדגמה זו נדמה התחברות מוצלחת
+            console.log('התחברות עם:', email);
+
+            // לצורך הדגמה, נעשה הפניה לדף דמה
+            alert('התחברות הצליחה!');
+            // window.location.href = 'dashboard.html';
+        });
+
+        // טיפול בטופס הרשמה
+        document.getElementById('registerFormElement').addEventListener('submit', function(event) {
+            event.preventDefault();
+
+            // קבלת ערכי הטופס
+            const fullName = document.getElementById('fullName').value;
+            const email = document.getElementById('registerEmail').value;
+            const password = document.getElementById('registerPassword').value;
+            const confirmPassword = document.getElementById('confirmPassword').value;
+
+            // איפוס הודעות שגיאה
+            document.getElementById('passwordError').textContent = '';
+            document.getElementById('confirmPasswordError').textContent = '';
+
+            // וידוא תקינות הסיסמה
+            if (password.length < 6) {
+                document.getElementById('passwordError').textContent = 'הסיסמה חייבת להכיל לפחות 6 תווים';
+                return;
+            }
+
+            // וידוא התאמת סיסמאות
+            if (password !== confirmPassword) {
+                document.getElementById('confirmPasswordError').textContent = 'הסיסמאות אינן תואמות';
+                return;
+            }
+
+            // לצורך הדגמה, נראה הודעת הצלחה
+            document.getElementById('successMessage').textContent = 'ההרשמה בוצעה בהצלחה!';
+
+            // איפוס הטופס
+            document.getElementById('fullName').value = '';
+            document.getElementById('registerEmail').value = '';
+            document.getElementById('registerPassword').value = '';
+            document.getElementById('confirmPassword').value = '';
+
+            // אחרי 2 שניות, נעבור לדף ההתחברות
+            setTimeout(() => {
+                document.getElementById('registerForm').style.display = 'none';
+                document.getElementById('loginForm').style.display = 'block';
+                document.getElementById('successMessage').textContent = '';
+            }, 2000);
+        });
+    </script>
+</body>
+</html>

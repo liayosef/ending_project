@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>אתר חסום</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="blocked-container">
+        <div class="blocked-card">
+            <div class="blocked-icon">🚫</div>
+            <h1 class="blocked-title">אתר חסום</h1>
+            <h2 class="blocked-subtitle">הגישה לאתר זה נחסמה על ידי המערכת</h2>
+            <div class="blocked-domain" id="blockedDomain">כתובת האתר: לא ידועה</div>
+            <p>לקבלת גישה, פנה להורים או למנהל המערכת.</p>
+            <a href="javascript:history.back()" class="back-btn">חזור אחורה</a>
+        </div>
+    </div>
+
+    <script>
+        // הצגת כתובת האתר החסום
+        document.addEventListener('DOMContentLoaded', function() {
+            const blockedDomainElement = document.getElementById('blockedDomain');
+            const currentUrl = window.location.href;
+            const urlParams = new URLSearchParams(window.location.search);
+            const domain = urlParams.get('domain') || window.location.hostname;
+
+            blockedDomainElement.textContent = `כתובת האתר: ${domain}`;
+        });
+    </script>
+</body>
+</html>
