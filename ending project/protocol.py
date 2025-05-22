@@ -1,59 +1,74 @@
 import json
-import socket
-import threading
+import struct
+
+# פורט התקשורת בין השרת לקליינט
+COMMUNICATION_PORT = 8888
 
 
-# פרוטוקול תקשורת
 class Protocol:
-    # קודי הודעות
-    REGISTER_CHILD = "REGISTER_CHILD"
-    UPDATE_DOMAINS = "UPDATE_DOMAINS"
-    GET_DOMAINS = "GET_DOMAINS"
-    CHILD_STATUS = "CHILD_STATUS"
-    ACK = "ACK"
-    ERROR = "ERROR"
+    """
+    פרוטוקול תקשורת בין שרת ההורים וקליינט הילד
+    """
+    # סוגי הודעות
+    REGISTER_CHILD = 1  # רישום ילד חדש
+    ACK = 2  # אישור
+    ERROR = 3  # שגיאה
+    GET_DOMAINS = 4  # בקשה לקבלת דומיינים חסומים
+    UPDATE_DOMAINS = 5  # עדכון דומיינים חסומים
+    CHILD_STATUS = 6  # עדכון סטטוס ילד
 
     @staticmethod
-    def create_message(message_type, data=None):
-        """יצירת הודעה בפרוטוקול"""
-        message = {
-            "type": message_type,
-            "data": data
-        }
-        return json.dumps(message).encode('utf-8')
+    def send_message(sock, msg_type, data=None):
+        """
+        שליחת הודעה לצד השני
 
-    @staticmethod
-    def parse_message(raw_message):
-        """פיענוח הודעה"""
-        try:
-            message = json.loads(raw_message.decode('utf-8'))
-            return message["type"], message["data"]
-        except Exception as e:
-            print(f"Error parsing message: {e}")
-            return Protocol.ERROR, str(e)
+        Args:
+            sock: סוקט להתחברות
+            msg_type: סוג ההודעה
+            data: מילון עם מידע נוסף (אופציונלי)
+        """
+        # אם אין מידע, נאתחל מילון ריק
+        if data is None:
+            data = {}
 
-    @staticmethod
-    def send_message(sock, message_type, data=None):
-        """שליחת הודעה דרך socket"""
-        try:
+        # המרת המידע ל-JSON
+        json_data = json.dumps(data).encode('utf-8')
 
-            message = Protocol.create_message(message_type, data)
-            sock.send(message)
-            return True
-        except Exception as e:
-            print(f"Error sending message: {e}")
-            return False
+        # בניית הודעה: סוג הודעה (4 בתים) + אורך מידע (4 בתים) + מידע
+        header = struct.pack('!II', msg_type, len(json_data))
+
+        # שליחת ההודעה
+        sock.sendall(header + json_data)
 
     @staticmethod
     def receive_message(sock):
-        """קבלת הודעה מ-socket"""
-        try:
-            raw_message = sock.recv(4096)
-            return Protocol.parse_message(raw_message)
-        except Exception as e:
-            print(f"Error receiving message: {e}")
-            return Protocol.ERROR, str(e)
+        """
+        קבלת הודעה מהצד השני
 
+        Args:
+            sock: סוקט להתחברות
 
-# הגדרות תקשורת
-COMMUNICATION_PORT = 5000  # פורט לתקשורת בין שרת למערכות ילדים
+        Returns:
+            tuple: (סוג ההודעה, המידע כמילון)
+        """
+        # קריאת header (8 בתים)
+        header = sock.recv(8)
+        if len(header) != 8:
+            raise ConnectionError("התקבל header לא תקין")
+
+        # פירוק ה-header
+        msg_type, data_len = struct.unpack('!II', header)
+
+        # קריאת המידע
+        data = b''
+        while len(data) < data_len:
+            chunk = sock.recv(min(4096, data_len - len(data)))
+            if not chunk:
+                raise ConnectionError("החיבור נסגר")
+            data += chunk
+
+        # המרת JSON לפייתון
+        if data:
+            return msg_type, json.loads(data.decode('utf-8'))
+        else:
+            return msg_type, {}

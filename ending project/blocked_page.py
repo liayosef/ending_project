@@ -1,7 +1,7 @@
 from http.server import BaseHTTPRequestHandler, HTTPServer
 import socket
 
-PORT = 8080
+PORT = 80
 
 
 class BlockPageHandler(BaseHTTPRequestHandler):
@@ -205,8 +205,7 @@ class BlockPageHandler(BaseHTTPRequestHandler):
             <h1 class="title">הגישה נחסמה</h1>
             <h2 class="subtitle">האתר שביקשת חסום על-ידי מערכת ההגנה</h2>
 
-            <div class="domain-box">
-                {requested_domain}
+            <div class="domain-box"> {requested_domain}
             </div>
 
             <p class="message">
@@ -229,7 +228,7 @@ def get_local_ip():
     """מציאת כתובת IP מקומית"""
     try:
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        s.connect(("8.8.8.8", 80))
+        s.connect(("0.0.0.0", 80))
         ip = s.getsockname()[0]
         s.close()
         return ip
