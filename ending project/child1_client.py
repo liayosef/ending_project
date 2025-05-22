@@ -13,6 +13,7 @@ import http.server
 import socketserver
 from urllib.parse import urlparse
 
+
 # קונפיגורציה ספציפית לילד 3
 CHILD_NAME = "ילד 3"
 
