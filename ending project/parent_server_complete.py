@@ -1,21 +1,123 @@
 import http.server
 import socketserver
 import json
-import socket
 import threading
+from datetime import timezone
+from typing import Optional, Dict, List, Tuple, Any
+import ipaddress
 import os
 import time
 import webbrowser
 import hashlib
 from urllib.parse import parse_qs, urlparse, quote, unquote
 from protocol import Protocol, COMMUNICATION_PORT
+import ssl
+from cryptography import x509
+from cryptography.x509.oid import NameOID
+from cryptography.hazmat.primitives import hashes, serialization
+from cryptography.hazmat.primitives.asymmetric import rsa
+import datetime
+import socket
 
 HTTP_PORT = 8000
+HTTPS_PORT = 8443
 
 # נתונים עבור ילדים
 children_data = {}
 data_lock = threading.Lock()
 active_connections = {}
+
+
+def create_ssl_certificate():
+    """יצירת תעודת SSL לשרת ההורים"""
+    if os.path.exists("parent_cert.pem") and os.path.exists("parent_key.pem"):
+        print("[*] ✅ תעודת SSL כבר קיימת")
+        return True
+
+    try:
+        print("[*] יוצר תעודת SSL לשרת ההורים...")
+
+        # יצירת מפתח פרטי
+        private_key = rsa.generate_private_key(
+            public_exponent=65537,
+            key_size=2048,
+        )
+
+        # יצירת תעודה
+        subject = issuer = x509.Name([
+            x509.NameAttribute(NameOID.COUNTRY_NAME, "IL"),
+            x509.NameAttribute(NameOID.ORGANIZATION_NAME, "Parent Control Server"),
+            x509.NameAttribute(NameOID.COMMON_NAME, "localhost"),
+        ])
+
+        cert = x509.CertificateBuilder().subject_name(
+            subject
+        ).issuer_name(
+            issuer
+        ).public_key(
+            private_key.public_key()
+        ).serial_number(
+            x509.random_serial_number()
+        ).not_valid_before(
+            datetime.datetime.now(timezone.utc)
+        ).not_valid_after(
+            datetime.datetime.now(timezone.utc) + datetime.timedelta(days=365)
+        ).add_extension(
+            x509.SubjectAlternativeName([
+                x509.DNSName("localhost"),
+                x509.DNSName("127.0.0.1"),
+                x509.IPAddress(ipaddress.IPv4Address("127.0.0.1")),
+            ]),
+            critical=False,
+        ).sign(private_key, hashes.SHA256())
+
+        # שמירה
+        with open("parent_cert.pem", "wb") as f:
+            f.write(cert.public_bytes(serialization.Encoding.PEM))
+
+        with open("parent_key.pem", "wb") as f:
+            f.write(private_key.private_bytes(
+                encoding=serialization.Encoding.PEM,
+                format=serialization.PrivateFormat.PKCS8,
+                encryption_algorithm=serialization.NoEncryption()
+            ))
+
+        print("[+] ✅ תעודת SSL נוצרה: parent_cert.pem, parent_key.pem")
+        return True
+
+    except ImportError:
+        print("[!] ⚠️  ספריית cryptography לא זמינה")
+        print("[!] הרץ: pip install cryptography")
+        return create_fallback_cert()
+    except Exception as e:
+        print(f"[!] שגיאה ביצירת תעודה: {e}")
+        return create_fallback_cert()
+
+
+def create_fallback_cert():
+    """תעודת חירום"""
+    cert_content = """-----BEGIN CERTIFICATE-----
+            MIIDXTCCAkWgAwIBAgIJAKoK/heBjcOuMA0GCSqGSIb3DQEBBQUAMEUxCzAJBgNV
+            BAYTAklMMRIwEAYDVQQKDAlQYXJlbnQgQ29udHJvbDESMBAGA1UEAwwJbG9jYWxo
+            b3N0MB4XDTI0MTIxMDAwMDAwMFoXDTI1MTIxMDAwMDAwMFowRTELMAkGA1UEBhMC
+            SUwxEjAQBgNVBAoMCVBhcmVudCBDb250cm9sMRIwEAYDVQQDDAlsb2NhbGhvc3Qw
+            ggEiMA0GCSqGSIb3DQEBAQUAA4IBDwAwggEKAoIBAQDMQiXPRhmA3O2M1gvG+ZAf
+             BNxf4WIaUfZltccCAwEAAQKCAQEAioSbz0NmZj0Oc/MWIBc+MTe0Fpgv-----END CERTIFICATE-----"""
+
+    key_content = """-----BEGIN PRIVATE KEY-----
+                MIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQDMQiXPRhmA3O2M
+                1gvG+ZAfBNxf4WIaUfZltccCAwEAAQKCAQEAioSbz0NmZj0Oc/MWIBc+MTe0Fpgv
+            -----END PRIVATE KEY-----"""
+
+    try:
+        with open("parent_cert.pem", "w") as f:
+            f.write(cert_content)
+        with open("parent_key.pem", "w") as f:
+            f.write(key_content)
+        print("[+] ✅ תעודת SSL בסיסית נוצרה")
+        return True
+    except:
+        return False
 
 
 class UserManager:
@@ -994,11 +1096,8 @@ class ParentServer:
             self.server_socket.close()
 
 
-print("[*] ParentServer אותחל עם פונקציות ניהול ילדים")
 
-# יצירת אובייקט ניהול משתמשים
-user_manager = UserManager()
-parent_server = ParentServer()
+print("[*] ParentServer אותחל עם פונקציות ניהול ילדים")
 
 
 class ParentHandler(http.server.SimpleHTTPRequestHandler):
@@ -1029,12 +1128,20 @@ class ParentHandler(http.server.SimpleHTTPRequestHandler):
                 conn_info = active_connections[child_name]
                 if conn_info and conn_info.get("socket"):
                     try:
-                        socket = conn_info["socket"]
+                        sock = conn_info["socket"]
                         domains = list(children_data[child_name]['blocked_domains'])
-                        Protocol.send_message(socket, Protocol.UPDATE_DOMAINS, {"domains": domains})
+                        Protocol.send_message(sock, Protocol.UPDATE_DOMAINS, {"domains": domains})
                         print(f"[*] נשלח עדכון מיידי ל-{child_name}")
                     except Exception as e:
                         print(f"[!] שגיאה בעדכון {child_name}: {e}")
+
+    def end_headers(self):
+        """הוספת headers אבטחה ל-HTTPS"""
+        self.send_header('Strict-Transport-Security', 'max-age=31536000')
+        self.send_header('X-Content-Type-Options', 'nosniff')
+        self.send_header('X-Frame-Options', 'DENY')
+        self.send_header('X-XSS-Protection', '1; mode=block')
+        super().end_headers()
 
     def do_GET(self):
         path = unquote(self.path)
@@ -1409,29 +1516,67 @@ class ParentHandler(http.server.SimpleHTTPRequestHandler):
             self.end_headers()
 
 
-if __name__ == "__main__":
-    try:
-        print("[*] מתחיל את שרת בקרת ההורים...")
-        print(f"[*] מנהל משתמשים: {len(user_manager.users)} משתמשים רשומים")
+user_manager = UserManager()
 
+if __name__ == "__main__":
+    parent_server = ParentServer()
+    try:
+        print("[*] 🔒 מתחיל שרת בקרת הורים עם HTTPS")
+        print(f"[*] מנהל משתמשים: {len(user_manager.users)} משתמשים רשומים")
         parent_server.start_communication_server()
 
-        with socketserver.TCPServer(("", HTTP_PORT), ParentHandler) as httpd:
-            print(f"[*] שרת HTTP פועל על http://localhost:{HTTP_PORT}")
-            print(f"[*] שרת תקשורת פועל על פורט {COMMUNICATION_PORT}")
-            print(f"[*] מוכן לקבל חיבורים מילדים")
-            server_url = f"http://localhost:{HTTP_PORT}"
-            print(f"[*] פותח דפדפן אוטומטית: {server_url}")
-            webbrowser.open(server_url)
+        # יצירת תעודת SSL
+        if create_ssl_certificate():
+            print("[*] ✅ מפעיל שרת HTTPS")
 
-            print("[*] לחץ Ctrl+C לעצירת השרת")
-            try:
-                httpd.serve_forever()
-            except KeyboardInterrupt:
-                print("\n[*] עצירת השרת...")
-                parent_server.shutdown()
-                httpd.shutdown()
+            with socketserver.TCPServer(("", HTTPS_PORT), ParentHandler) as httpd:
+                try:
+                    # הגדרת SSL
+                    context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+                    context.load_cert_chain('parent_cert.pem', 'parent_key.pem')
 
+                    # הגדרות אבטחה חזקות
+                    context.set_ciphers('ECDHE+AESGCM:ECDHE+CHACHA20:DHE+AESGCM:!aNULL:!MD5:!DSS')
+                    context.options |= ssl.OP_NO_SSLv2
+                    context.options |= ssl.OP_NO_SSLv3
 
+                    httpd.socket = context.wrap_socket(httpd.socket, server_side=True)
+
+                    print(f"[*] 🔒 שרת HTTPS פועל על https://localhost:{HTTPS_PORT}")
+                    print(f"[*] 📡 שרת תקשורת פועל על פורט {COMMUNICATION_PORT}")
+                    print(f"[*] 🎯 מוכן לקבל חיבורים מילדים")
+
+                    server_url = f"https://localhost:{HTTPS_PORT}"
+                    print(f"[*] 🌐 פותח דפדפן: {server_url}")
+                    print("[!] ⚠️  אם הדפדפן מתריע - לחץ 'Advanced' ← 'Proceed to localhost'")
+
+                    webbrowser.open(server_url)
+                    print("[*] לחץ Ctrl+C לעצירת השרת")
+                    httpd.serve_forever()
+
+                except ssl.SSLError as e:
+                    print(f"[!] ❌ שגיאת SSL: {e}")
+                    raise
+
+        else:
+            raise Exception("לא ניתן ליצור תעודת SSL")
+
+    except KeyboardInterrupt:
+        print("\n[*] עצירת השרת...")
+        parent_server.shutdown()
     except Exception as e:
-        print(f"[!] שגיאה בהפעלת השרת: {e}")
+        print(f"[!] ❌ שגיאה בהפעלת HTTPS: {e}")
+        print("[*] 🔄 עובר למצב HTTP כגיבוי...")
+
+        # גיבוי HTTP
+        try:
+            with socketserver.TCPServer(("", HTTP_PORT), ParentHandler) as httpd:
+                print(f"[*] 🔓 שרת HTTP פועל על http://localhost:{HTTP_PORT}")
+                server_url = f"http://localhost:{HTTP_PORT}"
+                webbrowser.open(server_url)
+                print("[*] לחץ Ctrl+C לעצירת השרת")
+                httpd.serve_forever()
+        except KeyboardInterrupt:
+            print("\n[*] עצירת השרת...")
+            parent_server.shutdown()
+

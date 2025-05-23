@@ -1,4 +1,3 @@
-import socket
 from scapy.all import *
 from scapy.layers.dns import DNS, DNSQR, DNSRR
 import json
@@ -12,6 +11,15 @@ from protocol import Protocol, COMMUNICATION_PORT
 import http.server
 import socketserver
 from urllib.parse import urlparse
+import socket
+import ssl
+import os
+import ipaddress  # הוספה חשובה!
+from cryptography import x509
+from cryptography.x509.oid import NameOID
+from cryptography.hazmat.primitives import hashes, serialization
+from cryptography.hazmat.primitives.asymmetric import rsa
+import datetime
 
 # קונפיגורציה ספציפית לילד 3
 CHILD_NAME = "ילד 3"
@@ -33,64 +41,212 @@ BLOCKED_DOMAINS = set()
 ORIGINAL_DNS = None
 
 
+def create_child_ssl_cert():
+    """יצירת תעודת SSL לשרת החסימה של הילד"""
+    if os.path.exists("child_cert.pem") and os.path.exists("child_key.pem"):
+        return True
+
+    try:
+        print("[*] יוצר תעודת SSL לשרת החסימה...")
+
+        private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+
+        subject = issuer = x509.Name([
+            x509.NameAttribute(NameOID.COUNTRY_NAME, "IL"),
+            x509.NameAttribute(NameOID.ORGANIZATION_NAME, f"Child Block Server - {CHILD_NAME}"),
+            x509.NameAttribute(NameOID.COMMON_NAME, "127.0.0.1"),
+        ])
+
+        cert = x509.CertificateBuilder().subject_name(
+            subject
+        ).issuer_name(
+            issuer
+        ).public_key(
+            private_key.public_key()
+        ).serial_number(
+            x509.random_serial_number()
+        ).not_valid_before(
+            datetime.datetime.now(timezone.utc)
+        ).not_valid_after(
+            datetime.datetime.now(timezone.utc) + datetime.timedelta(days=365)
+        ).add_extension(
+            x509.SubjectAlternativeName([
+                x509.DNSName("localhost"),
+                x509.DNSName("127.0.0.1"),
+                x509.IPAddress(ipaddress.IPv4Address("127.0.0.1")),
+            ]),
+            critical=False,
+        ).sign(private_key, hashes.SHA256())
+
+        with open("child_cert.pem", "wb") as f:
+            f.write(cert.public_bytes(serialization.Encoding.PEM))
+
+        with open("child_key.pem", "wb") as f:
+            f.write(private_key.private_bytes(
+                encoding=serialization.Encoding.PEM,
+                format=serialization.PrivateFormat.PKCS8,
+                encryption_algorithm=serialization.NoEncryption()
+            ))
+
+        print("[+] ✅ תעודת SSL נוצרה לשרת החסימה")
+        return True
+
+    except ImportError:
+        print("[*] ⚠️  ספריית cryptography לא זמינה - רק HTTP")
+        return False
+    except Exception as e:
+        print(f"[*] לא ניתן ליצור תעודה: {e}")
+        return False
+
+
 class BlockHandler(http.server.BaseHTTPRequestHandler):
     def do_GET(self):
-        """טיפול בבקשות HTTP"""
+        """טיפול בבקשות HTTP/HTTPS"""
         self.send_response(200)
         self.send_header('Content-type', 'text/html; charset=utf-8')
+        # הוספת headers אבטחה
+        self.send_header('X-Content-Type-Options', 'nosniff')
+        self.send_header('X-Frame-Options', 'DENY')
         self.end_headers()
 
-        # דף חסימה בעברית
-        block_page = """
+        # בדיקה אם זה HTTPS
+        is_https = hasattr(self.request, 'context')
+        protocol = "🔒 HTTPS" if is_https else "🔓 HTTP"
+
+        # דף חסימה משופר
+        block_page = f"""
         <!DOCTYPE html>
         <html dir="rtl" lang="he">
         <head>
             <meta charset="UTF-8">
-            <title>אתר חסום</title>
+            <title>אתר חסום - {CHILD_NAME}</title>
             <style>
-                body { 
-                    font-family: Arial, sans-serif; 
+                body {{ 
+                    font-family: 'Segoe UI', Tahoma, Arial, sans-serif; 
                     text-align: center; 
                     background: linear-gradient(135deg, #ff6b6b, #4ecdc4);
                     color: white;
                     margin: 0;
-                    padding: 50px;
-                }
-                .container {
-                    background: rgba(255,255,255,0.1);
+                    padding: 20px;
+                    min-height: 100vh;
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                }}
+                .container {{
+                    background: rgba(0,0,0,0.2);
+                    backdrop-filter: blur(10px);
                     padding: 40px;
                     border-radius: 20px;
                     box-shadow: 0 8px 32px rgba(0,0,0,0.3);
                     max-width: 600px;
-                    margin: 0 auto;
-                }
-                .icon { font-size: 80px; margin-bottom: 20px; }
-                h1 { font-size: 2.5em; margin-bottom: 20px; }
-                p { font-size: 1.2em; line-height: 1.6; }
+                    border: 1px solid rgba(255,255,255,0.2);
+                }}
+                .icon {{ font-size: 80px; margin-bottom: 20px; }}
+                h1 {{ font-size: 2.5em; margin-bottom: 20px; text-shadow: 2px 2px 4px rgba(0,0,0,0.3); }}
+                p {{ font-size: 1.2em; line-height: 1.6; }}
+                .protocol {{ 
+                    position: absolute; 
+                    top: 20px; 
+                    left: 20px; 
+                    background: rgba(0,0,0,0.3); 
+                    padding: 10px; 
+                    border-radius: 10px;
+                    font-size: 0.9em;
+                }}
+                .child-name {{
+                    position: absolute;
+                    top: 20px;
+                    right: 20px;
+                    background: rgba(0,0,0,0.3);
+                    padding: 10px;
+                    border-radius: 10px;
+                    font-size: 0.9em;
+                }}
             </style>
         </head>
         <body>
+            <div class="protocol">{protocol}</div>
+            <div class="child-name">👶 {CHILD_NAME}</div>
             <div class="container">
                 <div class="icon">🚫</div>
                 <h1>אתר זה חסום</h1>
                 <p>הגישה לאתר זה נחסמה על ידי מערכת בקרת ההורים.</p>
-                <p><strong>אתר:</strong> {}</p>
+                <p><strong>אתר:</strong> {self.headers.get('Host', 'לא ידוע')}</p>
+                <p><strong>זמן:</strong> {datetime.datetime.now().strftime('%H:%M:%S')}</p>
                 <hr style="margin: 30px 0; border: 1px solid rgba(255,255,255,0.3);">
-                <p style="font-size: 0.9em;">אם אתה חושב שזו טעות, פנה להורים.</p>
+                <p style="font-size: 0.9em;">אם אתה חושב שזו טעות, פנה להורים שלך.</p>
             </div>
         </body>
         </html>
-        """.format(self.headers.get('Host', 'לא ידוע'))
+        """
 
         self.wfile.write(block_page.encode('utf-8'))
 
     def do_POST(self):
-        """טיפול בבקשות POST"""
         self.do_GET()
 
     def log_message(self, format, *args):
-        """השתק לוגים של השרת"""
-        return
+        return  # השתק לוגים
+
+
+# עדכון פונקציית start_block_server
+def start_block_server():
+    """שרת חסימה עם תמיכה מלאה ב-HTTP ו-HTTPS"""
+
+    def start_http_server():
+        """שרת HTTP על פורט 80/8080"""
+        try:
+            with socketserver.TCPServer(("127.0.0.1", 80), BlockHandler) as httpd:
+                print("[+] 🔓 שרת חסימה HTTP פועל על פורט 80")
+                httpd.serve_forever()
+        except PermissionError:
+            try:
+                with socketserver.TCPServer(("127.0.0.1", 8080), BlockHandler) as httpd:
+                    print("[+] 🔓 שרת חסימה HTTP פועל על פורט 8080")
+                    httpd.serve_forever()
+            except Exception as e:
+                print(f"[!] שגיאה בשרת HTTP: {e}")
+        except Exception as e:
+            print(f"[!] שגיאה בשרת HTTP: {e}")
+
+    def start_https_server():
+        """שרת HTTPS על פורט 443/8443"""
+        if not create_child_ssl_cert():
+            print("[*] לא ניתן ליצור תעודת SSL לשרת החסימה")
+            return
+
+        try:
+            with socketserver.TCPServer(("127.0.0.1", 443), BlockHandler) as httpd:
+                context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+                context.load_cert_chain("child_cert.pem", "child_key.pem")
+                httpd.socket = context.wrap_socket(httpd.socket, server_side=True)
+                print("[+] 🔒 שרת חסימה HTTPS פועל על פורט 443")
+                httpd.serve_forever()
+        except PermissionError:
+            try:
+                with socketserver.TCPServer(("127.0.0.1", 8443), BlockHandler) as httpd:
+                    context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+                    context.load_cert_chain("child_cert.pem", "child_key.pem")
+                    httpd.socket = context.wrap_socket(httpd.socket, server_side=True)
+                    print("[+] 🔒 שרת חסימה HTTPS פועל על פורט 8443")
+                    httpd.serve_forever()
+            except Exception as e:
+                print(f"[!] שגיאה בשרת HTTPS: {e}")
+        except Exception as e:
+            print(f"[!] שגיאה בשרת HTTPS: {e}")
+
+    # הפעלת שני השרתים במקביל
+    print("[*] 🚀 מפעיל שרתי חסימה (HTTP + HTTPS)...")
+
+    http_thread = threading.Thread(target=start_http_server, daemon=True)
+    http_thread.start()
+
+    https_thread = threading.Thread(target=start_https_server, daemon=True)
+    https_thread.start()
+
+    # חזור לחוט הראשי
+    time.sleep(0.5)
 
 
 def clear_dns_cache():
@@ -107,25 +263,6 @@ def clear_dns_cache():
             print(f"[!] בעיה בניקוי cache: {result.stderr}")
     except Exception as e:
         print(f"[!] שגיאה בניקוי cache: {e}")
-
-
-def start_block_server():
-    """הפעלת שרת HTTP להצגת דף חסימה"""
-    try:
-        with socketserver.TCPServer(("127.0.0.1", 80), BlockHandler) as httpd:
-            print("[+] שרת דף חסימה פועל על http://127.0.0.1")
-            httpd.serve_forever()
-    except PermissionError:
-        print("[!] שגיאת הרשאות לפורט 80. מנסה פורט 8080...")
-        try:
-            with socketserver.TCPServer(("127.0.0.1", 8080), BlockHandler) as httpd:
-                print("[+] שרת דף חסימה פועל על http://127.0.0.1:8080")
-                httpd.serve_forever()
-        except Exception as e:
-            print(f"[!] לא ניתן להפעיל שרת חסימה: {e}")
-    except Exception as e:
-        print(f"[!] שגיאה בהפעלת שרת חסימה: {e}")
-
 
 class DNSManager:
     """מחלקה לניהול הגדרות DNS במערכת"""
@@ -558,6 +695,7 @@ def handle_dns_request(data, addr, sock):
 
 def start_dns_proxy():
     """הפעלת שרת Proxy DNS"""
+    print(f"[*] 🔒 מתחיל תוכנת בקרת הורים עבור {CHILD_NAME} עם תמיכה ב-HTTPS")
     print(f"[*] מפעיל Proxy DNS ל-{CHILD_NAME} על {LISTEN_IP}:{LISTEN_PORT}...")
     print(f"[*] דומיינים חסומים: {', '.join(BLOCKED_DOMAINS) if BLOCKED_DOMAINS else 'ממתין לעדכון מהשרת'}")
     print(f"[*] דף חסימה יוצג מכתובת: {BLOCK_PAGE_IP}")
