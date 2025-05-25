@@ -126,6 +126,7 @@ MAIN_SITE_DOMAINS = {
     'google.com': ['gstatic.com', 'googleapis.com']
 }
 
+
 def is_technical_domain(domain):
     """בדיקה משופרת אם זה דומיין טכני שלא צריך להופיע בהיסטוריה"""
     domain_lower = domain.lower().strip('.')

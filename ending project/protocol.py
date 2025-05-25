@@ -71,3 +71,4 @@ class Protocol:
             return msg_type, json.loads(data.decode('utf-8'))
         else:
             return msg_type, {}
+
