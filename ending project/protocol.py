@@ -16,12 +16,13 @@ class Protocol:
     GET_DOMAINS = 4  # בקשה לקבלת דומיינים חסומים
     UPDATE_DOMAINS = 5  # עדכון דומיינים חסומים
     CHILD_STATUS = 6  # עדכון סטטוס ילד
+    BROWSING_HISTORY = 7  # שליחת היסטוריית גלישה
+    GET_HISTORY = 8  # בקשה לקבלת היסטוריית גלישה
 
     @staticmethod
     def send_message(sock, msg_type, data=None):
         """
         שליחת הודעה לצד השני
-
         Args:
             sock: סוקט להתחברות
             msg_type: סוג ההודעה
@@ -44,10 +45,8 @@ class Protocol:
     def receive_message(sock):
         """
         קבלת הודעה מהצד השני
-
         Args:
             sock: סוקט להתחברות
-
         Returns:
             tuple: (סוג ההודעה, המידע כמילון)
         """
