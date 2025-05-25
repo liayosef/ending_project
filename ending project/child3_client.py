@@ -5,6 +5,7 @@ import json
 import threading
 import time
 import subprocess
+from collections import defaultdict
 import platform
 import os
 import ctypes
@@ -19,9 +20,12 @@ from cryptography.x509.oid import NameOID
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 import datetime
+from datetime import datetime, timedelta
 
-# קונפיגורציה ספציפית לילד 3
-CHILD_NAME = "ילד 3"
+REGISTRATION_FILE = "child_registration.json"
+REGISTRATION_CHECK_INTERVAL = 30
+
+CHILD_NAME = None
 
 REAL_DNS_SERVER = "8.8.8.8"
 LISTEN_IP = "0.0.0.0"
@@ -35,270 +39,241 @@ BLOCKED_DOMAINS = set()
 
 ORIGINAL_DNS = None
 
-# רשימת היסטוריית גלישה
 browsing_history = []
 history_lock = threading.Lock()
 MAX_HISTORY_ENTRIES = 1000  # מקסימום רשומות היסטוריה
 
-TECHNICAL_DOMAINS = {
-    # Google infrastructure
-    'gstatic.com', 'googleapis.com', 'googleusercontent.com', 'googlevideo.com',
-    'googletagmanager.com', 'google-analytics.com', 'googleadservices.com',
-    'fonts.googleapis.com', 'ajax.googleapis.com', 'analytics.google.com',
-    'doubleclick.net', 'googletagservices.com', 'googlesyndication.com',
-    'googleoptimize.com', 'googletagservices.com',
+# מעקב אחר ביקורים בחלון זמן
+domain_visits = defaultdict(list)
+domain_visits_lock = threading.Lock()
+MAIN_SITE_WINDOW_SECONDS = 30
 
-    # CDN ו-Infrastructure
-    'cloudflare.com', 'amazonaws.com', 'akamai.net', 'fastly.com',
-    'cloudfront.net', 'azureedge.net', 'jsdelivr.net', 'unpkg.com',
-    'cdnjs.cloudflare.com', 'maxcdn.bootstrapcdn.com', 'fastly-insights.com',
-    'rlcdn.com', 'contentsquare.net',
+OBVIOUS_TECHNICAL_PATTERNS = [
+    # Analytics & Ads & Tracking
+    'analytics', 'tracking', 'ads', 'doubleclick', 'googletagmanager',
+    'googleoptimize', 'googlesyndication', 'googleadservices',
+    'scorecardresearch', 'company-target', 'contentsquare', 'onetrust',
+    'measuring', 'metrics', 'telemetry', 'beacon', 'pixel',
 
-    # Ads & Analytics & Tracking
-    'googleads.g.doubleclick.net', 'securepubads.g.doubleclick.net',
-    'tpc.googlesyndication.com', 'pagead2.googlesyndication.com',
-    'adsystem.com', 'amazon-adsystem.com', 'adsafeprotected.com',
-    'scorecardresearch.com', 'company-target.com',
+    # CDN patterns & Netflix specific
+    'cdn', 'cache', 'static', 'assets', 'edge', 'akamai', 'cloudflare',
+    'fastly', 'jsdelivr', 'unpkg', 'rlcdn', 'scdn', 'spotifycdn',
+    'nflx', 'nflxext', 'nflxso', 'nflximg', 'nflxvideo',  # Netflix CDN
 
-    # Social media CDN - רק הטכניים
-    'scontent.xx.fbcdn.net', 'static.xx.fbcdn.net', 'connect.facebook.net',
-    'abs.twimg.com', 'ton.twimg.com', 'video.twimg.com',
-    'i.ytimg.com', 'yt3.ggpht.com', 'yt4.ggpht.com',
+    # TikTok & Social CDN
+    'tiktokv', 'ttwstatic', 'byteoversea', 'muscdn',
+    'fbcdn', 'twimg',
 
-    # Microsoft & Apple
-    'windows.com', 'live.com', 'msn.com', 'office.com', 'skype.com',
-    'microsoftonline.com', 'outlook.com', 'hotmail.com',
-    'icloud.com', 'me.com', 'apple.com', 'itunes.apple.com',
+    # Technical infrastructure
+    'api', 'ws', 'websocket', 'ajax', 'xhr', 'heartbeat', 'status',
 
-    # Security & certificates
-    'digicert.com', 'symantec.com', 'verisign.com', 'godaddy.com',
-    'letsencrypt.org', 'ssl.com', 'globalsign.com',
+    # URL shorteners (טכניים)
+    't.co', 'bit.ly', 'tinyurl', 'goo.gl', 'ow.ly',
 
-    # Analytics & Tracking
-    'statsig.anthropic.com', 'mixpanel.com', 'amplitude.com',
-    'segment.com', 'hotjar.com', 'fullstory.com', 'logrocket.com',
-    'sentry.io', 'bugsnag.com', 'rollbar.com', 'newrelic.com',
-    'datadog.com', 'splunk.com', 'intercom.io', 'zendesk.com',
-    'freshworks.com', 'salesforce.com', 'hubspot.com',
+    # Research & targeting
+    'research', 'insights', 'optimize', 'target', 'segment',
+    'mixpanel', 'amplitude', 'hotjar', 'statsig',
 
-    # Spotify specific CDN/Analytics
-    'spotifycdn.com', 'scdn.co', 'spotify-com.akamaized.net',
-
-    # TikTok specific CDN/Analytics
-    'tiktokv.com', 'ttwstatic.com', 'tiktokcdn.com', 'byteoversea.com',
-    'muscdn.com', 'musical.ly', 'ttlivecdn.com', 'tiktok-web.com',
-
-    # Netflix specific
-    'nflxext.com', 'nflximg.net', 'nflxso.net', 'nflxvideo.net',
-
-    # YouTube specific
-    'ytimg.com', 'ggpht.com', 'googlevideo.com',
-
-    # Facebook specific
-    'fbcdn.net', 'facebook.net',
-
-    # טכניים נוספים
-    'pingdom.com', 'statuspage.io', 'pingdom.net', 'uptime.com',
-    'gravatar.com', 'wp.com', 'wordpress.com', 'typekit.net',
-    'adobe.com', 'adobedtm.com', 'omtrdc.net', 'demdex.net'
-}
-
-# רשימת סיומות דומיינים טכניים
-TECHNICAL_SUFFIXES = {
-    '.gstatic.com', '.googleapis.com', '.googleusercontent.com',
-    '.googlevideo.com', '.googletagmanager.com', '.doubleclick.net',
-    '.cloudflare.com', '.amazonaws.com', '.akamai.net', '.fastly.com',
-    '.cloudfront.net', '.azureedge.net', '.fbcdn.net', '.twimg.com',
-    '.ytimg.com', '.ggpht.com', '.anthropic.com',
-    '.spotifycdn.com', '.scdn.co', '.nflxext.com', '.nflximg.net',
-    '.tiktokv.com', '.ttwstatic.com', '.byteoversea.com', '.muscdn.com'
-}
-
-# מפת אתרים עיקריים - דומיינים שייחשבו כמייצגים את האתר העיקרי
-MAIN_SITE_DOMAINS = {
-    'spotify.com': ['spotifycdn.com', 'scdn.co', 'spotify-com.akamaized.net'],
-    'tiktok.com': ['tiktokv.com', 'ttwstatic.com', 'tiktokcdn.com', 'byteoversea.com', 'muscdn.com', 'ttlivecdn.com'],
-    'netflix.com': ['nflxext.com', 'nflximg.net', 'nflxso.net', 'nflxvideo.net'],
-    'youtube.com': ['ytimg.com', 'ggpht.com', 'googlevideo.com'],
-    'facebook.com': ['fbcdn.net', 'facebook.net', 'connect.facebook.net'],
-    'instagram.com': ['fbcdn.net'],
-    'twitter.com': ['twimg.com'],
-    'google.com': ['gstatic.com', 'googleapis.com']
-}
+    # Suspicious patterns (malware/ads)
+    'measuring', 'tracking', 'monitor', 'collect', 'gather',
+    'optawo', 'sysmeasur',  # ספציפי לדומיינים החשודים שראית
+]
 
 
-def is_technical_domain(domain):
-    """בדיקה משופרת אם זה דומיין טכני שלא צריך להופיע בהיסטוריה"""
-    domain_lower = domain.lower().strip('.')
+def is_obviously_technical(domain):
+    """בדיקה אם הדומיין הוא בעליל טכני"""
+    domain_lower = domain.lower()
 
-    # בדיקה של דומיינים מלאים
-    if domain_lower in TECHNICAL_DOMAINS:
-        return True
+    # בדיקת מילות מפתח
+    for pattern in OBVIOUS_TECHNICAL_PATTERNS:
+        if pattern in domain_lower:
+            return True
 
-    # בדיקה של סיומות
-    for suffix in TECHNICAL_SUFFIXES:
+    # בדיקת תחיליות טכניות
+    technical_prefixes = ['ads.', 'ad.', 'analytics.', 'api.', 'cdn.', 'static.', 'cache.', 'edge.']
+    for prefix in technical_prefixes:
+        if domain_lower.startswith(prefix):
+            return True
+
+    # בדיקת סיומות טכניות נפוצות
+    technical_suffixes = ['.gstatic.com', '.googleapis.com', '.doubleclick.net']
+    for suffix in technical_suffixes:
         if domain_lower.endswith(suffix):
-            return True
-
-    # בדיקת תבניות נוספות
-    technical_patterns = [
-        'ads.', 'ad.', 'analytics.', 'tracking.', 'metrics.', 'stats.',
-        'pixel.', 'beacon.', 'api.', 'cdn.', 'static.', 'assets.',
-        'js.', 'css.', 'fonts.', 'img.', 'images.', 'media.',
-        'ajax.', 'widget.', 'embed.', 'plugin.', 'tools.',
-        'telemetry.', 'collect.', 'events.', 'ping.', 'heartbeat.',
-        'edge-', 'cache-', 'content-'
-    ]
-
-    for pattern in technical_patterns:
-        if domain_lower.startswith(pattern):
-            return True
-
-    # בדיקת תבניות מיוחדות לאנליטיקס וCDN
-    technical_keywords = [
-        'analytics', 'tracking', 'stats', 'metrics', 'telemetry', 'events',
-        'cdn', 'cache', 'edge', 'akamai', 'cloudflare', 'fastly',
-        'insights', 'optimize', 'research', 'target', 'content'
-    ]
-    for keyword in technical_keywords:
-        if keyword in domain_lower:
             return True
 
     return False
 
 
-def get_main_domain_from_subdomain(domain):
-    """מנסה לזהות לאיזה אתר עיקרי שייך הדומיין"""
-    domain_lower = domain.lower().strip('.')
+def is_suspicious_domain(domain):
+    """זיהוי דומיינים חשודים/malware"""
+    suspicious_patterns = [
+        # דומיינים עם שמות אקראיים
+        'kaushooptawo', 'sysmeasuring',
 
-    # בדיקה במפת האתרים העיקריים
-    for main_site, subdomains in MAIN_SITE_DOMAINS.items():
-        for subdomain in subdomains:
-            if domain_lower == subdomain or domain_lower.endswith('.' + subdomain):
-                return main_site
+        # תבניות של malware
+        'measuring', 'monitor', 'collect', 'gather', 'track',
 
-    return None
+        # סיומות חשודות
+        '.tk', '.ml', '.ga', '.cf',  # free domains נפוצים ב-malware
+
+        # תבניות של שמות אקראיים
+    ]
+
+    for pattern in suspicious_patterns:
+        if pattern in domain:
+            return True
+
+    # בדיקה אם השם נראה אקראי (הרבה עיצורים רצופים)
+    if len(domain) > 10 and has_random_pattern(domain):
+        return True
+
+    return False
 
 
-def get_main_domain(domain):
-    """חילוץ הדומיין הראשי - עם אלגוריתם חכם לסינון"""
-    original_domain = domain
+def has_random_pattern(domain):
+    """בדיקה אם השם נראה אקראי"""
+    # בדיקה פשוטה: יותר מ-4 עיצורים רצופים
+    consonants = 'bcdfghjklmnpqrstvwxyz'
+    consonant_count = 0
+
+    for char in domain.lower():
+        if char in consonants:
+            consonant_count += 1
+            if consonant_count >= 4:  # 4 עיצורים רצופים = חשוד
+                return True
+        else:
+            consonant_count = 0
+
+    return False
+
+
+def extract_main_domain(domain):
+    """חילוץ הדומיין הראשי (example.com)"""
     domain = domain.lower().strip('.')
-
-    # בדיקה ראשונה - אם זה דומיין טכני ברור
-    if is_technical_domain(domain):
-        print(f"[FILTER] דומיין טכני: {original_domain} -> מסונן")
-        return None
 
     # הסרת www
     if domain.startswith('www.'):
         domain = domain[4:]
 
-    # בדיקה אם זה תת-דומיין של אתר עיקרי מוכר
-    main_site = get_main_domain_from_subdomain(domain)
-    if main_site:
-        print(f"[FILTER] תת-דומיין: {original_domain} -> {main_site}")
-        return main_site
-
-    # רשימת תתי-דומיינים שכן רוצים להציג (רק אם הם לא טכניים)
-    important_subdomains = ['m.', 'mobile.', 'mail.', 'drive.', 'docs.', 'maps.', 'translate.']
-
-    # בדיקה אם זה תת-דומיין חשוב
-    for subdomain in important_subdomains:
-        if domain.startswith(subdomain):
-            print(f"[FILTER] תת-דומיין חשוב: {original_domain} -> {domain}")
-            return domain
-
-    # חילוץ הדומיין הראשי (domain.com)
+    # חילוץ שני החלקים האחרונים
     parts = domain.split('.')
     if len(parts) >= 2:
-        main_domain = '.'.join(parts[-2:])  # שני החלקים האחרונים
+        return '.'.join(parts[-2:])
 
-        # בדיקה נוספת שהדומיין הראשי לא טכני
-        if not is_technical_domain(main_domain):
-            print(f"[FILTER] דומיין עיקרי: {original_domain} -> {main_domain}")
-            return main_domain
-        else:
-            print(f"[FILTER] דומיין עיקרי טכני: {original_domain} -> מסונן")
-            return None
+    return domain
 
-    print(f"[FILTER] לא זוהה: {original_domain} -> מסונן")
+
+def find_main_site_in_window(current_time):
+    """מציאת האתר הראשי שנגש אליו בחלון הזמן האחרון"""
+    cutoff_time = current_time - datetime.timedelta(seconds=MAIN_SITE_WINDOW_SECONDS)
+
+    # מחפש דומיינים שלא טכניים בחלון הזמן
+    candidates = []
+
+    with domain_visits_lock:
+        for domain, visits in list(domain_visits.items()):
+            # נקה ביקורים ישנים
+            recent_visits = [v for v in visits if v > cutoff_time]
+            domain_visits[domain] = recent_visits
+
+            # אם יש ביקורים אחרונים ולא טכני
+            if recent_visits and not is_obviously_technical(domain):
+                main_domain = extract_main_domain(domain)
+                candidates.append((main_domain, len(recent_visits), max(recent_visits)))
+
+    if candidates:
+        # מחזיר את הדומיין עם הכי הרבה ביקורים, או האחרון
+        candidates.sort(key=lambda x: (x[1], x[2]), reverse=True)
+        return candidates[0][0]
+
     return None
 
 
-# מטמון לעיכוב בקשות דומות (למניעת ספאם)
-domain_visit_cache = {}
-VISIT_GROUPING_SECONDS = 300  # 5 דקות
-
-
-def should_add_to_history(domain, timestamp, was_blocked):
-    """בדיקה משופרת אם להוסיף רשומה להיסטוריה"""
-    main_domain = get_main_domain(domain)
-
-    # אם זה דומיין טכני שלא רוצים להציג
-    if main_domain is None:
-        return False, None
-
-    # בדיקה של קיבוץ ביקורים - כל ביקור לאותו דומיין תוך 5 דקות נחשב כאחד
+def smart_domain_filter(domain):
+    """פילטר חכם שמחליט אם להציג את הדומיין"""
     current_time = datetime.datetime.now()
-    domain_key = f"{main_domain}_{was_blocked}"  # מפריד בין חסום למותר
+    domain_lower = domain.lower().strip('.')
 
-    if domain_key in domain_visit_cache:
-        time_diff = (current_time - domain_visit_cache[domain_key]).total_seconds()
-        if time_diff < VISIT_GROUPING_SECONDS:
-            # עדכון הזמן בלבד, לא הוספת רשומה חדשה
-            domain_visit_cache[domain_key] = current_time
-            print(f"[FILTER] דילוג - ביקור אחרון ב-{main_domain}: {int(time_diff)} שניות")
-            return False, main_domain
+    # הסרת www
+    clean_domain = domain_lower[4:] if domain_lower.startswith('www.') else domain_lower
 
-    # רשומה חדשה
-    domain_visit_cache[domain_key] = current_time
-    print(f"[FILTER] רשומה חדשה: {main_domain}")
-    return True, main_domain
+    print(f"[SMART] בודק: {domain}")
+
+    # בדיקה 1: אם זה דומיין טכני ברור - מסנן
+    if is_obviously_technical(clean_domain):
+        print(f"[SMART] טכני ברור: {domain} -> מסונן")
+        return None
+
+    # רישום הביקור
+    with domain_visits_lock:
+        domain_visits[clean_domain].append(current_time)
+
+    # בדיקה 2: אם זה דומיין ראשי ברור (אין נקודות נוספות או רק www)
+    main_domain = extract_main_domain(clean_domain)
+    if clean_domain == main_domain:
+        print(f"[SMART] דומיין ראשי: {domain} -> {main_domain}")
+        return main_domain
+
+    # בדיקה 3: תת-דומיינים חשובים
+    important_subdomains = ['m.', 'mobile.', 'mail.', 'drive.', 'docs.', 'maps.', 'translate.']
+    for subdomain in important_subdomains:
+        if clean_domain.startswith(subdomain):
+            print(f"[SMART] תת-דומיין חשוב: {domain} -> {clean_domain}")
+            return clean_domain
+
+    # בדיקה 4: חיפוש אתר ראשי בחלון זמן
+    main_site = find_main_site_in_window(current_time)
+
+    if main_site and main_domain == main_site:
+        print(f"[SMART] שייך לאתר ראשי: {domain} -> {main_site}")
+        return main_site
+    elif main_site and main_domain != main_site:
+        print(f"[SMART] לא שייך לאתר ראשי {main_site}: {domain} -> מסונן")
+        return None
+    else:
+        # אין אתר ראשי ברור - מציג את הדומיין הראשי
+        print(f"[SMART] דומיין עצמאי: {domain} -> {main_domain}")
+        return main_domain
 
 
-last_visit_time = {}
-VISIT_GROUPING_SECONDS = 120  # קיבוץ ביקורים שקורים תוך דקה
+# מטמון לעיכוב רשומות כפולות
+last_recorded = {}
+RECORD_COOLDOWN_SECONDS = 300  # 5 דקות
 
 
-def should_add_to_history(domain, timestamp, was_blocked):
-    """בדיקה אם להוסיף רשומה להיסטוריה"""
-    main_domain = get_main_domain(domain)
-
-    # אם זה דומיין טכני שלא רוצים להציג
-    if main_domain is None:
-        return False, None
-
-    # בדיקה של קיבוץ ביקורים - כל ביקור לאותו דומיין תוך 2 דקות נחשב כאחד
+def should_record_visit(domain, was_blocked):
+    """בדיקה אם לרשום את הביקור (מניעת ספאם)"""
     current_time = datetime.datetime.now()
-    domain_key = main_domain  # רק לפי דומיין, לא לפי סטטוס חסימה
+    key = f"{domain}_{was_blocked}"
 
-    if domain_key in last_visit_time:
-        time_diff = (current_time - last_visit_time[domain_key]).total_seconds()
-        if time_diff < VISIT_GROUPING_SECONDS:
-            # עדכון הזמן בלבד, לא הוספת רשומה חדשה
-            last_visit_time[domain_key] = current_time
-            return False, main_domain
+    if key in last_recorded:
+        time_diff = (current_time - last_recorded[key]).total_seconds()
+        if time_diff < RECORD_COOLDOWN_SECONDS:
+            print(f"[HISTORY] דילוג (קירור): {domain} - {int(time_diff)} שניות")
+            return False
 
-    # רשומה חדשה
-    last_visit_time[domain_key] = current_time
-    return True, main_domain
+    last_recorded[key] = current_time
+    return True
 
 
 def add_to_history(domain, timestamp, was_blocked=False):
-    """הוספת רשומה להיסטוריית הגלישה עם סינון חכם"""
-    should_add, main_domain = should_add_to_history(domain, timestamp, was_blocked)
+    """הוספה חכמה להיסטוריה - גרסה משופרת"""
 
-    if not should_add:
-        if main_domain:
-            print(f"[HISTORY] דילוג על {domain} (כבר בוקר {main_domain} לאחרונה)")
-        else:
-            print(f"[HISTORY] דילוג על {domain} (דומיין טכני)")
+    # פילטור חכם
+    display_domain = smart_domain_filter(domain)
+
+    if display_domain is None:
+        print(f"[HISTORY] מסונן: {domain}")
         return
 
+    # בדיקת קירור
+    if not should_record_visit(display_domain, was_blocked):
+        return
+
+    # הוספה להיסטוריה
     with history_lock:
         entry = {
-            "domain": main_domain,
+            "domain": display_domain,
             "timestamp": timestamp,
             "was_blocked": was_blocked,
             "child_name": CHILD_NAME
@@ -306,14 +281,14 @@ def add_to_history(domain, timestamp, was_blocked=False):
 
         browsing_history.append(entry)
 
-        # שמירה על מגבלת הרשומות
         if len(browsing_history) > MAX_HISTORY_ENTRIES:
-            browsing_history.pop(0)  # הסרת הרשומה הישנה ביותר
+            browsing_history.pop(0)
 
-        print(f"[HISTORY] נוסף לרשימה: {main_domain} ({'חסום' if was_blocked else 'מותר'})")
+        print(f"[HISTORY] ✅ נוסף: {display_domain} ({'חסום' if was_blocked else 'מותר'})")
 
-        # שליחה מיידית לשרת ההורים
+        # שליחה לשרת
         threading.Thread(target=send_single_history_update, args=(entry,), daemon=True).start()
+
 
 
 def send_single_history_update(entry):

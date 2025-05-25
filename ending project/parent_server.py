@@ -5,7 +5,6 @@ import threading
 from datetime import timezone
 from typing import Optional, Dict, List, Tuple, Any
 import ipaddress
-
 import os
 import time
 import webbrowser
@@ -907,6 +906,12 @@ BROWSING_HISTORY_TEMPLATE = """<!DOCTYPE html>
             color: #666;
             font-size: 14px;
         }
+           .danger-btn {
+           background: #e74c3c !important;
+        }
+           .danger-btn:hover {
+           background: #c0392b !important;
+           }
     </style>
 </head>
 <body>
@@ -948,7 +953,16 @@ BROWSING_HISTORY_TEMPLATE = """<!DOCTYPE html>
                 <a href="/browsing_history" class="filter-btn" style="background: #95a5a6; text-decoration: none;">נקה סינון</a>
             </form>
         </div>
-
+                <form method="post" action="/clear_history" style="display: inline-block; margin-right: 15px;">
+    <select name="child" class="filter-input" required>
+        <option value="">בחר ילד למחיקת היסטוריה</option>
+        ${children_options}
+    </select>
+    <button type="submit" class="filter-btn" style="background: #e74c3c;" 
+            onclick="return confirm('האם אתה בטוח שברצונך למחוק את כל ההיסטוריה של הילד הנבחר?')">
+        🗑️ מחק היסטוריה
+    </button>
+</form>
         <div class="history-container">
             <div class="history-header">
                 <h3>היסטוריית גלישה (${total_entries} רשומות)</h3>
@@ -1940,6 +1954,31 @@ class ParentHandler(http.server.SimpleHTTPRequestHandler):
                 self.send_header('Content-type', 'text/html')
                 self.end_headers()
                 self.wfile.write(b'<h1>Server Error</h1>')
+        elif self.path == '/clear_history':
+                # בדיקה אם המשתמש מחובר
+                logged_in_user = self.is_logged_in()
+                if not logged_in_user:
+                    self.send_response(302)
+                    self.send_header('Location', '/login')
+                    self.end_headers()
+                    return
+
+                child_name = post_params.get('child', [''])[0].strip()
+                print(f"[DEBUG] בקשה למחיקת היסטוריה עבור: '{child_name}'")
+
+                if child_name:
+                    with history_lock:
+                        if child_name in browsing_history:
+                            del browsing_history[child_name]
+                            save_browsing_history()
+                            print(f"[+] ✅ היסטוריה של '{child_name}' נמחקה בהצלחה")
+                        else:
+                            print(f"[!] ⚠️ לא נמצאה היסטוריה עבור '{child_name}'")
+
+                # חזרה לדף היסטוריה
+                self.send_response(302)
+                self.send_header('Location', '/browsing_history')
+                self.end_headers()
         else:
             self.send_response(404)
             self.end_headers()
