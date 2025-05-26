@@ -1314,6 +1314,7 @@ class ParentServer:
 
         try:
             msg_type, data = Protocol.receive_message(client_socket)
+            print(f"[DEBUG] התקבלה הודעה: {msg_type}, נתונים: {data}")
 
             if msg_type == Protocol.REGISTER_CHILD:
                 child_name = data.get('name')
@@ -1327,16 +1328,49 @@ class ParentServer:
 
                     active_connections[child_name] = {"socket": client_socket, "address": address}
 
+                    # עכשיו נמשיך לטפל בתקשורת
                     self.handle_child_communication(client_socket, child_name)
-
                 else:
                     Protocol.send_message(client_socket, Protocol.ERROR, {"message": "Invalid child name"})
                     print(f"[!] שם ילד לא תקין: {child_name}")
 
+            elif msg_type == Protocol.VERIFY_CHILD:
+                # 🆕 טיפול באימות ילד
+                requested_child = data.get("child_name")
+                print(f"[VERIFY] בקשת אימות עבור: '{requested_child}'")
+
+                with data_lock:
+                    is_valid = requested_child in children_data
+
+                Protocol.send_message(client_socket, Protocol.VERIFY_RESPONSE, {"is_valid": is_valid})
+                print(f"[VERIFY] תגובה ל-'{requested_child}': {'✅ תקף' if is_valid else '❌ לא תקף'}")
+
+                # ⚠️ חשוב! לא לסגור את החיבור כאן אם הילד תקף
+                if is_valid:
+                    # עדכון פרטי הילד
+                    with data_lock:
+                        children_data[requested_child]['client_address'] = address
+                        children_data[requested_child]['last_seen'] = time.time()
+
+                    child_name = requested_child
+                    active_connections[requested_child] = {"socket": client_socket, "address": address}
+                    print(f"[+] ילד '{requested_child}' אומת ונרשם")
+
+                    # ⚠️ כאן הייתה הבעיה - לא היינו ממשיכים לטפל בתקשורת!
+                    self.handle_child_communication(client_socket, child_name)
+                else:
+                    # אם הילד לא תקף, סוגרים את החיבור
+                    client_socket.close()
+                    return
+
         except Exception as e:
             print(f"[!] שגיאה בחיבור {child_name}: {e}")
+            import traceback
+            traceback.print_exc()
         finally:
-            client_socket.close()
+            # רק נסגור את החיבור אם זה לא ילד תקף שמחובר
+            if child_name not in active_connections:
+                client_socket.close()
             if child_name:
                 with data_lock:
                     if child_name in children_data:
