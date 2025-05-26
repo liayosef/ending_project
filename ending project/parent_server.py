@@ -1379,6 +1379,7 @@ class ParentServer:
                         del active_connections[child_name]
                 print(f"[-] {child_name} התנתק")
 
+
     def handle_child_communication(self, client_socket, child_name):
         while self.running:
             try:

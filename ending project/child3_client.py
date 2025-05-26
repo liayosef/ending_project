@@ -418,7 +418,6 @@ def create_success_page(title, message):
 </body>
 </html>'''
 
-
 # הודעות שגיאה והצלחה מעוצבות:
 def create_error_page(title, message, back_button=True, retry_button=False):
     buttons = ""
