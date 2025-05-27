@@ -5,6 +5,1302 @@
       "timestamp": "2025-05-25T23:58:26.574157",
       "was_blocked": true,
       "child_name": "ילד 3"
+    },
+    {
+      "domain": "clients4.google.com",
+      "timestamp": "2025-05-27T23:19:22.368270",
+      "was_blocked": false,
+      "child_name": "ילד 3"
+    },
+    {
+      "domain": "clients4.google.com",
+      "timestamp": "2025-05-27T23:19:22.370304",
+      "was_blocked": false,
+      "child_name": "ילד 3"
+    },
+    {
+      "domain": "www.google.com",
+      "timestamp": "2025-05-27T23:19:31.610149",
+      "was_blocked": false,
+      "child_name": "ילד 3"
+    },
+    {
+      "domain": "www.google.com",
+      "timestamp": "2025-05-27T23:19:31.610149",
+      "was_blocked": false,
+      "child_name": "ילד 3"
+    },
+    {
+      "domain": "open.spotify.com",
+      "timestamp": "2025-05-27T23:19:33.031381",
+      "was_blocked": false,
+      "child_name": "ילד 3"
+    },
+    {
+      "domain": "open.spotify.com",
+      "timestamp": "2025-05-27T23:19:33.031381",
+      "was_blocked": false,
+      "child_name": "ילד 3"
+    },
+    {
+      "domain": "play.google.com",
+      "timestamp": "2025-05-27T23:19:33.166635",
+      "was_blocked": false,
+      "child_name": "ילד 3"
+    },
+    {
+      "domain": "play.google.com",
+      "timestamp": "2025-05-27T23:19:33.169671",
+      "was_blocked": false,
+      "child_name": "ילד 3"
+    },
+    {
+      "domain": "apresolve.spotify.com",
+      "timestamp": "2025-05-27T23:19:33.862224",
+      "was_blocked": false,
+      "child_name": "ילד 3"
+    },
+    {
+      "domain": "apresolve.spotify.com",
+      "timestamp": "2025-05-27T23:19:33.864219",
+      "was_blocked": false,
+      "child_name": "ילד 3"
+    },
+    {
+      "domain": "clienttoken.spotify.com",
+      "timestamp": "2025-05-27T23:19:33.867211",
+      "was_blocked": false,
+      "child_name": "ילד 3"
+    },
+    {
+      "domain": "clienttoken.spotify.com",
+      "timestamp": "2025-05-27T23:19:33.868208",
+      "was_blocked": false,
+      "child_name": "ילד 3"
+    },
+    {
+      "domain": "www.google.com",
+      "timestamp": "2025-05-27T23:19:33.894144",
+      "was_blocked": false,
+      "child_name": "ילד 3"
+    },
+    {
+      "domain": "www.google.com",
+      "timestamp": "2025-05-27T23:19:33.897133",
+      "was_blocked": false,
+      "child_name": "ילד 3"
+    },
+    {
+      "domain": "gew1-spclient.spotify.com",
+      "timestamp": "2025-05-27T23:19:33.980919",
+      "was_blocked": false,
+      "child_name": "ילד 3"
+    },
+    {
+      "domain": "gew1-spclient.spotify.com",
+      "timestamp": "2025-05-27T23:19:33.980919",
+      "was_blocked": false,
+      "child_name": "ילד 3"
+    },
+    {
+      "domain": "gew1-dealer.spotify.com",
+      "timestamp": "2025-05-27T23:19:33.981915",
+      "was_blocked": false,
+      "child_name": "ילד 3"
+    },
+    {
+      "domain": "gew1-dealer.spotify.com",
+      "timestamp": "2025-05-27T23:19:33.984913",
+      "was_blocked": false,
+      "child_name": "ילד 3"
+    },
+    {
+      "domain": "pixel.spotify.com",
+      "timestamp": "2025-05-27T23:19:34.018820",
+      "was_blocked": false,
+      "child_name": "ילד 3"
+    },
+    {
+      "domain": "pixel.spotify.com",
+      "timestamp": "2025-05-27T23:19:34.018820",
+      "was_blocked": false,
+      "child_name": "ילד 3"
+    },
+    {
+      "domain": "o22381.ingest.sentry.io",
+      "timestamp": "2025-05-27T23:19:34.220310",
+      "was_blocked": false,
+      "child_name": "ילד 3"
+    },
+    {
+      "domain": "o22381.ingest.sentry.io",
+      "timestamp": "2025-05-27T23:19:34.222297",
+      "was_blocked": false,
+      "child_name": "ילד 3"
+    },
+    {
+      "domain": "www.google.com",
+      "timestamp": "2025-05-27T23:19:34.312067",
+      "was_blocked": false,
+      "child_name": "ילד 3"
+    },
+    {
+      "domain": "www.google.com",
+      "timestamp": "2025-05-27T23:19:34.313064",
+      "was_blocked": false,
+      "child_name": "ילד 3"
+    },
+    {
+      "domain": "exp.wg.spotify.com",
+      "timestamp": "2025-05-27T23:19:34.613523",
+      "was_blocked": false,
+      "child_name": "ילד 3"
+    },
+    {
+      "domain": "exp.wg.spotify.com",
+      "timestamp": "2025-05-27T23:19:34.614520",
+      "was_blocked": false,
+      "child_name": "ילד 3"
+    },
+    {
+      "domain": "spclient.wg.spotify.com",
+      "timestamp": "2025-05-27T23:19:34.786078",
+      "was_blocked": false,
+      "child_name": "ילד 3"
+    },
+    {
+      "domain": "spclient.wg.spotify.com",
+      "timestamp": "2025-05-27T23:19:34.806028",
+      "was_blocked": false,
+      "child_name": "ילד 3"
+    },
+    {
+      "domain": "web.whatsapp.com",
+      "timestamp": "2025-05-27T23:19:40.354641",
+      "was_blocked": false,
+      "child_name": "ילד 3"
+    },
+    {
+      "domain": "web.whatsapp.com",
+      "timestamp": "2025-05-27T23:19:40.358636",
+      "was_blocked": false,
+      "child_name": "ילד 3"
+    },
+    {
+      "domain": "www.instagram.com",
+      "timestamp": "2025-05-27T23:19:41.151044",
+      "was_blocked": true,
+      "child_name": "ילד 3"
+    },
+    {
+      "domain": "www.instagram.com",
+      "timestamp": "2025-05-27T23:19:41.154033",
+      "was_blocked": true,
+      "child_name": "ילד 3"
+    },
+    {
+      "domain": "clients4.google.com",
+      "timestamp": "2025-05-27T23:24:47.891758",
+      "was_blocked": false,
+      "child_name": "ילד 3"
+    },
+    {
+      "domain": "clients4.google.com",
+      "timestamp": "2025-05-27T23:24:47.890760",
+      "was_blocked": false,
+      "child_name": "ילד 3"
+    },
+    {
+      "domain": "clients4.google.com",
+      "timestamp": "2025-05-27T23:24:47.891758",
+      "was_blocked": false,
+      "child_name": "ילד 3"
+    },
+    {
+      "domain": "clients4.google.com",
+      "timestamp": "2025-05-27T23:24:47.890760",
+      "was_blocked": false,
+      "child_name": "ילד 3"
+    },
+    {
+      "domain": "www.google.com",
+      "timestamp": "2025-05-27T23:25:13.746112",
+      "was_blocked": false,
+      "child_name": "ילד 3"
+    },
+    {
+      "domain": "www.google.com",
+      "timestamp": "2025-05-27T23:25:13.747109",
+      "was_blocked": false,
+      "child_name": "ילד 3"
+    },
+    {
+      "domain": "play.google.com",
+      "timestamp": "2025-05-27T23:25:15.131809",
+      "was_blocked": false,
+      "child_name": "ילד 3"
+    },
+    {
+      "domain": "play.google.com",
+      "timestamp": "2025-05-27T23:25:15.134802",
+      "was_blocked": false,
+      "child_name": "ילד 3"
+    },
+    {
+      "domain": "open.spotify.com",
+      "timestamp": "2025-05-27T23:25:15.507147",
+      "was_blocked": false,
+      "child_name": "ילד 3"
+    },
+    {
+      "domain": "open.spotify.com",
+      "timestamp": "2025-05-27T23:25:15.508144",
+      "was_blocked": false,
+      "child_name": "ילד 3"
+    },
+    {
+      "domain": "apresolve.spotify.com",
+      "timestamp": "2025-05-27T23:25:16.314858",
+      "was_blocked": false,
+      "child_name": "ילד 3"
+    },
+    {
+      "domain": "apresolve.spotify.com",
+      "timestamp": "2025-05-27T23:25:16.315857",
+      "was_blocked": false,
+      "child_name": "ילד 3"
+    },
+    {
+      "domain": "clienttoken.spotify.com",
+      "timestamp": "2025-05-27T23:25:16.317851",
+      "was_blocked": false,
+      "child_name": "ילד 3"
+    },
+    {
+      "domain": "clienttoken.spotify.com",
+      "timestamp": "2025-05-27T23:25:16.319846",
+      "was_blocked": false,
+      "child_name": "ילד 3"
+    },
+    {
+      "domain": "www.google.com",
+      "timestamp": "2025-05-27T23:25:16.324833",
+      "was_blocked": false,
+      "child_name": "ילד 3"
+    },
+    {
+      "domain": "www.google.com",
+      "timestamp": "2025-05-27T23:25:16.326829",
+      "was_blocked": false,
+      "child_name": "ילד 3"
+    },
+    {
+      "domain": "gew1-spclient.spotify.com",
+      "timestamp": "2025-05-27T23:25:16.370727",
+      "was_blocked": false,
+      "child_name": "ילד 3"
+    },
+    {
+      "domain": "gew1-spclient.spotify.com",
+      "timestamp": "2025-05-27T23:25:16.381687",
+      "was_blocked": false,
+      "child_name": "ילד 3"
+    },
+    {
+      "domain": "gew1-dealer.spotify.com",
+      "timestamp": "2025-05-27T23:25:16.390665",
+      "was_blocked": false,
+      "child_name": "ילד 3"
+    },
+    {
+      "domain": "gew1-dealer.spotify.com",
+      "timestamp": "2025-05-27T23:25:16.405626",
+      "was_blocked": false,
+      "child_name": "ילד 3"
+    },
+    {
+      "domain": "pixel.spotify.com",
+      "timestamp": "2025-05-27T23:25:16.408618",
+      "was_blocked": false,
+      "child_name": "ילד 3"
+    },
+    {
+      "domain": "pixel.spotify.com",
+      "timestamp": "2025-05-27T23:25:16.409615",
+      "was_blocked": false,
+      "child_name": "ילד 3"
+    },
+    {
+      "domain": "exp.wg.spotify.com",
+      "timestamp": "2025-05-27T23:25:16.559231",
+      "was_blocked": false,
+      "child_name": "ילד 3"
+    },
+    {
+      "domain": "exp.wg.spotify.com",
+      "timestamp": "2025-05-27T23:25:16.560228",
+      "was_blocked": false,
+      "child_name": "ילד 3"
+    },
+    {
+      "domain": "o22381.ingest.sentry.io",
+      "timestamp": "2025-05-27T23:25:16.605113",
+      "was_blocked": false,
+      "child_name": "ילד 3"
+    },
+    {
+      "domain": "o22381.ingest.sentry.io",
+      "timestamp": "2025-05-27T23:25:16.619077",
+      "was_blocked": false,
+      "child_name": "ילד 3"
+    },
+    {
+      "domain": "spclient.wg.spotify.com",
+      "timestamp": "2025-05-27T23:25:16.671941",
+      "was_blocked": false,
+      "child_name": "ילד 3"
+    },
+    {
+      "domain": "spclient.wg.spotify.com",
+      "timestamp": "2025-05-27T23:25:16.673936",
+      "was_blocked": false,
+      "child_name": "ילד 3"
+    },
+    {
+      "domain": "www.google.com",
+      "timestamp": "2025-05-27T23:25:16.756754",
+      "was_blocked": false,
+      "child_name": "ילד 3"
+    },
+    {
+      "domain": "www.google.com",
+      "timestamp": "2025-05-27T23:25:16.757750",
+      "was_blocked": false,
+      "child_name": "ילד 3"
+    },
+    {
+      "domain": "www.spotify.com",
+      "timestamp": "2025-05-27T23:25:18.798919",
+      "was_blocked": false,
+      "child_name": "ילד 3"
+    },
+    {
+      "domain": "www.spotify.com",
+      "timestamp": "2025-05-27T23:25:18.799916",
+      "was_blocked": false,
+      "child_name": "ילד 3"
+    },
+    {
+      "domain": "t.contentsquare.net",
+      "timestamp": "2025-05-27T23:25:18.815875",
+      "was_blocked": false,
+      "child_name": "ילד 3"
+    },
+    {
+      "domain": "t.contentsquare.net",
+      "timestamp": "2025-05-27T23:25:18.817872",
+      "was_blocked": false,
+      "child_name": "ילד 3"
+    },
+    {
+      "domain": "www.fastly-insights.com",
+      "timestamp": "2025-05-27T23:25:18.882703",
+      "was_blocked": false,
+      "child_name": "ילד 3"
+    },
+    {
+      "domain": "www.fastly-insights.com",
+      "timestamp": "2025-05-27T23:25:18.883701",
+      "was_blocked": false,
+      "child_name": "ילד 3"
+    },
+    {
+      "domain": "sb.scorecardresearch.com",
+      "timestamp": "2025-05-27T23:25:19.041301",
+      "was_blocked": false,
+      "child_name": "ילד 3"
+    },
+    {
+      "domain": "sb.scorecardresearch.com",
+      "timestamp": "2025-05-27T23:25:19.041301",
+      "was_blocked": false,
+      "child_name": "ילד 3"
+    },
+    {
+      "domain": "spotify.demdex.net",
+      "timestamp": "2025-05-27T23:25:19.201883",
+      "was_blocked": false,
+      "child_name": "ילד 3"
+    },
+    {
+      "domain": "spotify.demdex.net",
+      "timestamp": "2025-05-27T23:25:19.202880",
+      "was_blocked": false,
+      "child_name": "ילד 3"
+    },
+    {
+      "domain": "c.contentsquare.net",
+      "timestamp": "2025-05-27T23:25:19.386408",
+      "was_blocked": false,
+      "child_name": "ילד 3"
+    },
+    {
+      "domain": "c.contentsquare.net",
+      "timestamp": "2025-05-27T23:25:19.387407",
+      "was_blocked": false,
+      "child_name": "ילד 3"
+    },
+    {
+      "domain": "segments.company-target.com",
+      "timestamp": "2025-05-27T23:25:19.555971",
+      "was_blocked": false,
+      "child_name": "ילד 3"
+    },
+    {
+      "domain": "segments.company-target.com",
+      "timestamp": "2025-05-27T23:25:19.557966",
+      "was_blocked": false,
+      "child_name": "ילד 3"
+    },
+    {
+      "domain": "www.google.co.il",
+      "timestamp": "2025-05-27T23:25:19.828548",
+      "was_blocked": false,
+      "child_name": "ילד 3"
+    },
+    {
+      "domain": "www.google.co.il",
+      "timestamp": "2025-05-27T23:25:19.830543",
+      "was_blocked": false,
+      "child_name": "ילד 3"
+    },
+    {
+      "domain": "fastly-insights.com",
+      "timestamp": "2025-05-27T23:25:20.062073",
+      "was_blocked": false,
+      "child_name": "ילד 3"
+    },
+    {
+      "domain": "fastly-insights.com",
+      "timestamp": "2025-05-27T23:25:20.063071",
+      "was_blocked": false,
+      "child_name": "ילד 3"
+    },
+    {
+      "domain": "cph-v4.pops.fastly-insights.com",
+      "timestamp": "2025-05-27T23:25:20.388234",
+      "was_blocked": false,
+      "child_name": "ילד 3"
+    },
+    {
+      "domain": "cph-v4.pops.fastly-insights.com",
+      "timestamp": "2025-05-27T23:25:20.388234",
+      "was_blocked": false,
+      "child_name": "ילד 3"
+    },
+    {
+      "domain": "0c49a648-049e-42ac-a228-31c02cd59324.apac.u.fastly-insights.com",
+      "timestamp": "2025-05-27T23:25:20.788366",
+      "was_blocked": false,
+      "child_name": "ילד 3"
+    },
+    {
+      "domain": "0c49a648-049e-42ac-a228-31c02cd59324.apac.u.fastly-insights.com",
+      "timestamp": "2025-05-27T23:25:20.789362",
+      "was_blocked": false,
+      "child_name": "ילד 3"
+    },
+    {
+      "domain": "lhr-v4.pops.fastly-insights.com",
+      "timestamp": "2025-05-27T23:25:21.628582",
+      "was_blocked": false,
+      "child_name": "ילד 3"
+    },
+    {
+      "domain": "lhr-v4.pops.fastly-insights.com",
+      "timestamp": "2025-05-27T23:25:21.630580",
+      "was_blocked": false,
+      "child_name": "ילד 3"
+    },
+    {
+      "domain": "lfpg-v4.pops.fastly-insights.com",
+      "timestamp": "2025-05-27T23:25:22.110166",
+      "was_blocked": false,
+      "child_name": "ילד 3"
+    },
+    {
+      "domain": "lfpg-v4.pops.fastly-insights.com",
+      "timestamp": "2025-05-27T23:25:22.111179",
+      "was_blocked": false,
+      "child_name": "ילד 3"
+    },
+    {
+      "domain": "bare-v4.pops.fastly-insights.com",
+      "timestamp": "2025-05-27T23:25:22.461620",
+      "was_blocked": false,
+      "child_name": "ילד 3"
+    },
+    {
+      "domain": "bare-v4.pops.fastly-insights.com",
+      "timestamp": "2025-05-27T23:25:22.462616",
+      "was_blocked": false,
+      "child_name": "ילד 3"
+    },
+    {
+      "domain": "sbgr-v4.pops.fastly-insights.com",
+      "timestamp": "2025-05-27T23:25:22.909600",
+      "was_blocked": false,
+      "child_name": "ילד 3"
+    },
+    {
+      "domain": "sbgr-v4.pops.fastly-insights.com",
+      "timestamp": "2025-05-27T23:25:22.910579",
+      "was_blocked": false,
+      "child_name": "ילד 3"
+    },
+    {
+      "domain": "t.co",
+      "timestamp": "2025-05-27T23:25:23.303333",
+      "was_blocked": false,
+      "child_name": "ילד 3"
+    },
+    {
+      "domain": "t.co",
+      "timestamp": "2025-05-27T23:25:23.305327",
+      "was_blocked": false,
+      "child_name": "ילד 3"
+    },
+    {
+      "domain": "k-aeu1.contentsquare.net",
+      "timestamp": "2025-05-27T23:25:23.644456",
+      "was_blocked": false,
+      "child_name": "ילד 3"
+    },
+    {
+      "domain": "k-aeu1.contentsquare.net",
+      "timestamp": "2025-05-27T23:25:23.644456",
+      "was_blocked": false,
+      "child_name": "ילד 3"
+    },
+    {
+      "domain": "0c49a648-049e-42ac-a228-31c02cd59324-pdata-v4.unique.k.fastly-insights.com",
+      "timestamp": "2025-05-27T23:25:23.843522",
+      "was_blocked": false,
+      "child_name": "ילד 3"
+    },
+    {
+      "domain": "0c49a648-049e-42ac-a228-31c02cd59324-pdata-v4.unique.k.fastly-insights.com",
+      "timestamp": "2025-05-27T23:25:23.848511",
+      "was_blocked": false,
+      "child_name": "ילד 3"
+    },
+    {
+      "domain": "any-v4.pops.fastly-insights.com",
+      "timestamp": "2025-05-27T23:25:24.318398",
+      "was_blocked": false,
+      "child_name": "ילד 3"
+    },
+    {
+      "domain": "any-v4.pops.fastly-insights.com",
+      "timestamp": "2025-05-27T23:25:24.321382",
+      "was_blocked": false,
+      "child_name": "ילד 3"
+    },
+    {
+      "domain": "hkg-v4.pops.fastly-insights.com",
+      "timestamp": "2025-05-27T23:25:24.656829",
+      "was_blocked": false,
+      "child_name": "ילד 3"
+    },
+    {
+      "domain": "hkg-v4.pops.fastly-insights.com",
+      "timestamp": "2025-05-27T23:25:24.658820",
+      "was_blocked": false,
+      "child_name": "ילד 3"
+    },
+    {
+      "domain": "myofek.cet.ac.il",
+      "timestamp": "2025-05-27T23:25:35.344531",
+      "was_blocked": false,
+      "child_name": "ילד 3"
+    },
+    {
+      "domain": "myofek.cet.ac.il",
+      "timestamp": "2025-05-27T23:25:35.349521",
+      "was_blocked": false,
+      "child_name": "ילד 3"
+    },
+    {
+      "domain": "nairobigateway.cet.ac.il",
+      "timestamp": "2025-05-27T23:25:36.575713",
+      "was_blocked": false,
+      "child_name": "ילד 3"
+    },
+    {
+      "domain": "nairobigateway.cet.ac.il",
+      "timestamp": "2025-05-27T23:25:36.575713",
+      "was_blocked": false,
+      "child_name": "ילד 3"
+    },
+    {
+      "domain": "connect.facebook.net",
+      "timestamp": "2025-05-27T23:25:36.616608",
+      "was_blocked": false,
+      "child_name": "ילד 3"
+    },
+    {
+      "domain": "connect.facebook.net",
+      "timestamp": "2025-05-27T23:25:36.619600",
+      "was_blocked": false,
+      "child_name": "ילד 3"
+    },
+    {
+      "domain": "vc.hotjar.io",
+      "timestamp": "2025-05-27T23:25:36.831428",
+      "was_blocked": false,
+      "child_name": "ילד 3"
+    },
+    {
+      "domain": "vc.hotjar.io",
+      "timestamp": "2025-05-27T23:25:36.832425",
+      "was_blocked": false,
+      "child_name": "ילד 3"
+    },
+    {
+      "domain": "www.google.co.il",
+      "timestamp": "2025-05-27T23:25:36.968018",
+      "was_blocked": false,
+      "child_name": "ילד 3"
+    },
+    {
+      "domain": "www.google.co.il",
+      "timestamp": "2025-05-27T23:25:36.969016",
+      "was_blocked": false,
+      "child_name": "ילד 3"
+    },
+    {
+      "domain": "www.facebook.com",
+      "timestamp": "2025-05-27T23:25:37.443884",
+      "was_blocked": false,
+      "child_name": "ילד 3"
+    },
+    {
+      "domain": "www.facebook.com",
+      "timestamp": "2025-05-27T23:25:37.443884",
+      "was_blocked": false,
+      "child_name": "ילד 3"
+    },
+    {
+      "domain": "www.facebook.com",
+      "timestamp": "2025-05-27T23:25:37.855263",
+      "was_blocked": false,
+      "child_name": "ילד 3"
+    },
+    {
+      "domain": "www.facebook.com",
+      "timestamp": "2025-05-27T23:25:37.857258",
+      "was_blocked": false,
+      "child_name": "ילד 3"
+    },
+    {
+      "domain": "ebag.cet.ac.il",
+      "timestamp": "2025-05-27T23:25:38.069718",
+      "was_blocked": false,
+      "child_name": "ילד 3"
+    },
+    {
+      "domain": "ebag.cet.ac.il",
+      "timestamp": "2025-05-27T23:25:38.070715",
+      "was_blocked": false,
+      "child_name": "ילד 3"
+    },
+    {
+      "domain": "clients4.google.com",
+      "timestamp": "2025-05-27T23:24:47.891758",
+      "was_blocked": false,
+      "child_name": "ילד 3"
+    },
+    {
+      "domain": "clients4.google.com",
+      "timestamp": "2025-05-27T23:24:47.890760",
+      "was_blocked": false,
+      "child_name": "ילד 3"
+    },
+    {
+      "domain": "www.google.com",
+      "timestamp": "2025-05-27T23:25:13.746112",
+      "was_blocked": false,
+      "child_name": "ילד 3"
+    },
+    {
+      "domain": "www.google.com",
+      "timestamp": "2025-05-27T23:25:13.747109",
+      "was_blocked": false,
+      "child_name": "ילד 3"
+    },
+    {
+      "domain": "play.google.com",
+      "timestamp": "2025-05-27T23:25:15.131809",
+      "was_blocked": false,
+      "child_name": "ילד 3"
+    },
+    {
+      "domain": "play.google.com",
+      "timestamp": "2025-05-27T23:25:15.134802",
+      "was_blocked": false,
+      "child_name": "ילד 3"
+    },
+    {
+      "domain": "open.spotify.com",
+      "timestamp": "2025-05-27T23:25:15.507147",
+      "was_blocked": false,
+      "child_name": "ילד 3"
+    },
+    {
+      "domain": "open.spotify.com",
+      "timestamp": "2025-05-27T23:25:15.508144",
+      "was_blocked": false,
+      "child_name": "ילד 3"
+    },
+    {
+      "domain": "apresolve.spotify.com",
+      "timestamp": "2025-05-27T23:25:16.314858",
+      "was_blocked": false,
+      "child_name": "ילד 3"
+    },
+    {
+      "domain": "apresolve.spotify.com",
+      "timestamp": "2025-05-27T23:25:16.315857",
+      "was_blocked": false,
+      "child_name": "ילד 3"
+    },
+    {
+      "domain": "clienttoken.spotify.com",
+      "timestamp": "2025-05-27T23:25:16.317851",
+      "was_blocked": false,
+      "child_name": "ילד 3"
+    },
+    {
+      "domain": "clienttoken.spotify.com",
+      "timestamp": "2025-05-27T23:25:16.319846",
+      "was_blocked": false,
+      "child_name": "ילד 3"
+    },
+    {
+      "domain": "www.google.com",
+      "timestamp": "2025-05-27T23:25:16.324833",
+      "was_blocked": false,
+      "child_name": "ילד 3"
+    },
+    {
+      "domain": "www.google.com",
+      "timestamp": "2025-05-27T23:25:16.326829",
+      "was_blocked": false,
+      "child_name": "ילד 3"
+    },
+    {
+      "domain": "gew1-spclient.spotify.com",
+      "timestamp": "2025-05-27T23:25:16.370727",
+      "was_blocked": false,
+      "child_name": "ילד 3"
+    },
+    {
+      "domain": "gew1-spclient.spotify.com",
+      "timestamp": "2025-05-27T23:25:16.381687",
+      "was_blocked": false,
+      "child_name": "ילד 3"
+    },
+    {
+      "domain": "gew1-dealer.spotify.com",
+      "timestamp": "2025-05-27T23:25:16.390665",
+      "was_blocked": false,
+      "child_name": "ילד 3"
+    },
+    {
+      "domain": "gew1-dealer.spotify.com",
+      "timestamp": "2025-05-27T23:25:16.405626",
+      "was_blocked": false,
+      "child_name": "ילד 3"
+    },
+    {
+      "domain": "pixel.spotify.com",
+      "timestamp": "2025-05-27T23:25:16.408618",
+      "was_blocked": false,
+      "child_name": "ילד 3"
+    },
+    {
+      "domain": "pixel.spotify.com",
+      "timestamp": "2025-05-27T23:25:16.409615",
+      "was_blocked": false,
+      "child_name": "ילד 3"
+    },
+    {
+      "domain": "exp.wg.spotify.com",
+      "timestamp": "2025-05-27T23:25:16.559231",
+      "was_blocked": false,
+      "child_name": "ילד 3"
+    },
+    {
+      "domain": "exp.wg.spotify.com",
+      "timestamp": "2025-05-27T23:25:16.560228",
+      "was_blocked": false,
+      "child_name": "ילד 3"
+    },
+    {
+      "domain": "o22381.ingest.sentry.io",
+      "timestamp": "2025-05-27T23:25:16.605113",
+      "was_blocked": false,
+      "child_name": "ילד 3"
+    },
+    {
+      "domain": "o22381.ingest.sentry.io",
+      "timestamp": "2025-05-27T23:25:16.619077",
+      "was_blocked": false,
+      "child_name": "ילד 3"
+    },
+    {
+      "domain": "spclient.wg.spotify.com",
+      "timestamp": "2025-05-27T23:25:16.671941",
+      "was_blocked": false,
+      "child_name": "ילד 3"
+    },
+    {
+      "domain": "spclient.wg.spotify.com",
+      "timestamp": "2025-05-27T23:25:16.673936",
+      "was_blocked": false,
+      "child_name": "ילד 3"
+    },
+    {
+      "domain": "www.google.com",
+      "timestamp": "2025-05-27T23:25:16.756754",
+      "was_blocked": false,
+      "child_name": "ילד 3"
+    },
+    {
+      "domain": "www.google.com",
+      "timestamp": "2025-05-27T23:25:16.757750",
+      "was_blocked": false,
+      "child_name": "ילד 3"
+    },
+    {
+      "domain": "www.spotify.com",
+      "timestamp": "2025-05-27T23:25:18.798919",
+      "was_blocked": false,
+      "child_name": "ילד 3"
+    },
+    {
+      "domain": "www.spotify.com",
+      "timestamp": "2025-05-27T23:25:18.799916",
+      "was_blocked": false,
+      "child_name": "ילד 3"
+    },
+    {
+      "domain": "t.contentsquare.net",
+      "timestamp": "2025-05-27T23:25:18.815875",
+      "was_blocked": false,
+      "child_name": "ילד 3"
+    },
+    {
+      "domain": "t.contentsquare.net",
+      "timestamp": "2025-05-27T23:25:18.817872",
+      "was_blocked": false,
+      "child_name": "ילד 3"
+    },
+    {
+      "domain": "www.fastly-insights.com",
+      "timestamp": "2025-05-27T23:25:18.882703",
+      "was_blocked": false,
+      "child_name": "ילד 3"
+    },
+    {
+      "domain": "www.fastly-insights.com",
+      "timestamp": "2025-05-27T23:25:18.883701",
+      "was_blocked": false,
+      "child_name": "ילד 3"
+    },
+    {
+      "domain": "sb.scorecardresearch.com",
+      "timestamp": "2025-05-27T23:25:19.041301",
+      "was_blocked": false,
+      "child_name": "ילד 3"
+    },
+    {
+      "domain": "sb.scorecardresearch.com",
+      "timestamp": "2025-05-27T23:25:19.041301",
+      "was_blocked": false,
+      "child_name": "ילד 3"
+    },
+    {
+      "domain": "spotify.demdex.net",
+      "timestamp": "2025-05-27T23:25:19.201883",
+      "was_blocked": false,
+      "child_name": "ילד 3"
+    },
+    {
+      "domain": "spotify.demdex.net",
+      "timestamp": "2025-05-27T23:25:19.202880",
+      "was_blocked": false,
+      "child_name": "ילד 3"
+    },
+    {
+      "domain": "c.contentsquare.net",
+      "timestamp": "2025-05-27T23:25:19.386408",
+      "was_blocked": false,
+      "child_name": "ילד 3"
+    },
+    {
+      "domain": "c.contentsquare.net",
+      "timestamp": "2025-05-27T23:25:19.387407",
+      "was_blocked": false,
+      "child_name": "ילד 3"
+    },
+    {
+      "domain": "segments.company-target.com",
+      "timestamp": "2025-05-27T23:25:19.555971",
+      "was_blocked": false,
+      "child_name": "ילד 3"
+    },
+    {
+      "domain": "segments.company-target.com",
+      "timestamp": "2025-05-27T23:25:19.557966",
+      "was_blocked": false,
+      "child_name": "ילד 3"
+    },
+    {
+      "domain": "www.google.co.il",
+      "timestamp": "2025-05-27T23:25:19.828548",
+      "was_blocked": false,
+      "child_name": "ילד 3"
+    },
+    {
+      "domain": "www.google.co.il",
+      "timestamp": "2025-05-27T23:25:19.830543",
+      "was_blocked": false,
+      "child_name": "ילד 3"
+    },
+    {
+      "domain": "fastly-insights.com",
+      "timestamp": "2025-05-27T23:25:20.062073",
+      "was_blocked": false,
+      "child_name": "ילד 3"
+    },
+    {
+      "domain": "fastly-insights.com",
+      "timestamp": "2025-05-27T23:25:20.063071",
+      "was_blocked": false,
+      "child_name": "ילד 3"
+    },
+    {
+      "domain": "cph-v4.pops.fastly-insights.com",
+      "timestamp": "2025-05-27T23:25:20.388234",
+      "was_blocked": false,
+      "child_name": "ילד 3"
+    },
+    {
+      "domain": "cph-v4.pops.fastly-insights.com",
+      "timestamp": "2025-05-27T23:25:20.388234",
+      "was_blocked": false,
+      "child_name": "ילד 3"
+    },
+    {
+      "domain": "0c49a648-049e-42ac-a228-31c02cd59324.apac.u.fastly-insights.com",
+      "timestamp": "2025-05-27T23:25:20.788366",
+      "was_blocked": false,
+      "child_name": "ילד 3"
+    },
+    {
+      "domain": "0c49a648-049e-42ac-a228-31c02cd59324.apac.u.fastly-insights.com",
+      "timestamp": "2025-05-27T23:25:20.789362",
+      "was_blocked": false,
+      "child_name": "ילד 3"
+    },
+    {
+      "domain": "lhr-v4.pops.fastly-insights.com",
+      "timestamp": "2025-05-27T23:25:21.628582",
+      "was_blocked": false,
+      "child_name": "ילד 3"
+    },
+    {
+      "domain": "lhr-v4.pops.fastly-insights.com",
+      "timestamp": "2025-05-27T23:25:21.630580",
+      "was_blocked": false,
+      "child_name": "ילד 3"
+    },
+    {
+      "domain": "lfpg-v4.pops.fastly-insights.com",
+      "timestamp": "2025-05-27T23:25:22.110166",
+      "was_blocked": false,
+      "child_name": "ילד 3"
+    },
+    {
+      "domain": "lfpg-v4.pops.fastly-insights.com",
+      "timestamp": "2025-05-27T23:25:22.111179",
+      "was_blocked": false,
+      "child_name": "ילד 3"
+    },
+    {
+      "domain": "bare-v4.pops.fastly-insights.com",
+      "timestamp": "2025-05-27T23:25:22.461620",
+      "was_blocked": false,
+      "child_name": "ילד 3"
+    },
+    {
+      "domain": "bare-v4.pops.fastly-insights.com",
+      "timestamp": "2025-05-27T23:25:22.462616",
+      "was_blocked": false,
+      "child_name": "ילד 3"
+    },
+    {
+      "domain": "sbgr-v4.pops.fastly-insights.com",
+      "timestamp": "2025-05-27T23:25:22.909600",
+      "was_blocked": false,
+      "child_name": "ילד 3"
+    },
+    {
+      "domain": "sbgr-v4.pops.fastly-insights.com",
+      "timestamp": "2025-05-27T23:25:22.910579",
+      "was_blocked": false,
+      "child_name": "ילד 3"
+    },
+    {
+      "domain": "t.co",
+      "timestamp": "2025-05-27T23:25:23.303333",
+      "was_blocked": false,
+      "child_name": "ילד 3"
+    },
+    {
+      "domain": "t.co",
+      "timestamp": "2025-05-27T23:25:23.305327",
+      "was_blocked": false,
+      "child_name": "ילד 3"
+    },
+    {
+      "domain": "k-aeu1.contentsquare.net",
+      "timestamp": "2025-05-27T23:25:23.644456",
+      "was_blocked": false,
+      "child_name": "ילד 3"
+    },
+    {
+      "domain": "k-aeu1.contentsquare.net",
+      "timestamp": "2025-05-27T23:25:23.644456",
+      "was_blocked": false,
+      "child_name": "ילד 3"
+    },
+    {
+      "domain": "0c49a648-049e-42ac-a228-31c02cd59324-pdata-v4.unique.k.fastly-insights.com",
+      "timestamp": "2025-05-27T23:25:23.843522",
+      "was_blocked": false,
+      "child_name": "ילד 3"
+    },
+    {
+      "domain": "0c49a648-049e-42ac-a228-31c02cd59324-pdata-v4.unique.k.fastly-insights.com",
+      "timestamp": "2025-05-27T23:25:23.848511",
+      "was_blocked": false,
+      "child_name": "ילד 3"
+    },
+    {
+      "domain": "any-v4.pops.fastly-insights.com",
+      "timestamp": "2025-05-27T23:25:24.318398",
+      "was_blocked": false,
+      "child_name": "ילד 3"
+    },
+    {
+      "domain": "any-v4.pops.fastly-insights.com",
+      "timestamp": "2025-05-27T23:25:24.321382",
+      "was_blocked": false,
+      "child_name": "ילד 3"
+    },
+    {
+      "domain": "hkg-v4.pops.fastly-insights.com",
+      "timestamp": "2025-05-27T23:25:24.656829",
+      "was_blocked": false,
+      "child_name": "ילד 3"
+    },
+    {
+      "domain": "hkg-v4.pops.fastly-insights.com",
+      "timestamp": "2025-05-27T23:25:24.658820",
+      "was_blocked": false,
+      "child_name": "ילד 3"
+    },
+    {
+      "domain": "myofek.cet.ac.il",
+      "timestamp": "2025-05-27T23:25:35.344531",
+      "was_blocked": false,
+      "child_name": "ילד 3"
+    },
+    {
+      "domain": "myofek.cet.ac.il",
+      "timestamp": "2025-05-27T23:25:35.349521",
+      "was_blocked": false,
+      "child_name": "ילד 3"
+    },
+    {
+      "domain": "nairobigateway.cet.ac.il",
+      "timestamp": "2025-05-27T23:25:36.575713",
+      "was_blocked": false,
+      "child_name": "ילד 3"
+    },
+    {
+      "domain": "nairobigateway.cet.ac.il",
+      "timestamp": "2025-05-27T23:25:36.575713",
+      "was_blocked": false,
+      "child_name": "ילד 3"
+    },
+    {
+      "domain": "connect.facebook.net",
+      "timestamp": "2025-05-27T23:25:36.616608",
+      "was_blocked": false,
+      "child_name": "ילד 3"
+    },
+    {
+      "domain": "connect.facebook.net",
+      "timestamp": "2025-05-27T23:25:36.619600",
+      "was_blocked": false,
+      "child_name": "ילד 3"
+    },
+    {
+      "domain": "vc.hotjar.io",
+      "timestamp": "2025-05-27T23:25:36.831428",
+      "was_blocked": false,
+      "child_name": "ילד 3"
+    },
+    {
+      "domain": "vc.hotjar.io",
+      "timestamp": "2025-05-27T23:25:36.832425",
+      "was_blocked": false,
+      "child_name": "ילד 3"
+    },
+    {
+      "domain": "www.google.co.il",
+      "timestamp": "2025-05-27T23:25:36.968018",
+      "was_blocked": false,
+      "child_name": "ילד 3"
+    },
+    {
+      "domain": "www.google.co.il",
+      "timestamp": "2025-05-27T23:25:36.969016",
+      "was_blocked": false,
+      "child_name": "ילד 3"
+    },
+    {
+      "domain": "www.facebook.com",
+      "timestamp": "2025-05-27T23:25:37.443884",
+      "was_blocked": false,
+      "child_name": "ילד 3"
+    },
+    {
+      "domain": "www.facebook.com",
+      "timestamp": "2025-05-27T23:25:37.443884",
+      "was_blocked": false,
+      "child_name": "ילד 3"
+    },
+    {
+      "domain": "www.facebook.com",
+      "timestamp": "2025-05-27T23:25:37.855263",
+      "was_blocked": false,
+      "child_name": "ילד 3"
+    },
+    {
+      "domain": "www.facebook.com",
+      "timestamp": "2025-05-27T23:25:37.857258",
+      "was_blocked": false,
+      "child_name": "ילד 3"
+    },
+    {
+      "domain": "ebag.cet.ac.il",
+      "timestamp": "2025-05-27T23:25:38.069718",
+      "was_blocked": false,
+      "child_name": "ילד 3"
+    },
+    {
+      "domain": "ebag.cet.ac.il",
+      "timestamp": "2025-05-27T23:25:38.070715",
+      "was_blocked": false,
+      "child_name": "ילד 3"
+    },
+    {
+      "domain": "classroom.google.com",
+      "timestamp": "2025-05-27T23:26:02.196497",
+      "was_blocked": false,
+      "child_name": "ילד 3"
+    },
+    {
+      "domain": "classroom.google.com",
+      "timestamp": "2025-05-27T23:26:02.198493",
+      "was_blocked": false,
+      "child_name": "ילד 3"
+    },
+    {
+      "domain": "signaler-pa.clients6.google.com",
+      "timestamp": "2025-05-27T23:26:04.184057",
+      "was_blocked": false,
+      "child_name": "ילד 3"
+    },
+    {
+      "domain": "signaler-pa.clients6.google.com",
+      "timestamp": "2025-05-27T23:26:04.185054",
+      "was_blocked": false,
+      "child_name": "ילד 3"
+    },
+    {
+      "domain": "feedback-pa.clients6.google.com",
+      "timestamp": "2025-05-27T23:26:04.309732",
+      "was_blocked": false,
+      "child_name": "ילד 3"
+    },
+    {
+      "domain": "feedback-pa.clients6.google.com",
+      "timestamp": "2025-05-27T23:26:04.310731",
+      "was_blocked": false,
+      "child_name": "ילד 3"
+    },
+    {
+      "domain": "accounts.google.com",
+      "timestamp": "2025-05-27T23:26:04.885422",
+      "was_blocked": false,
+      "child_name": "ילד 3"
+    },
+    {
+      "domain": "accounts.google.com",
+      "timestamp": "2025-05-27T23:26:04.887416",
+      "was_blocked": false,
+      "child_name": "ילד 3"
+    },
+    {
+      "domain": "play.google.com",
+      "timestamp": "2025-05-27T23:26:04.888413",
+      "was_blocked": false,
+      "child_name": "ילד 3"
+    },
+    {
+      "domain": "play.google.com",
+      "timestamp": "2025-05-27T23:26:04.889411",
+      "was_blocked": false,
+      "child_name": "ילד 3"
+    },
+    {
+      "domain": "ogs.google.com",
+      "timestamp": "2025-05-27T23:26:08.716095",
+      "was_blocked": false,
+      "child_name": "ילד 3"
+    },
+    {
+      "domain": "ogs.google.com",
+      "timestamp": "2025-05-27T23:26:08.718090",
+      "was_blocked": false,
+      "child_name": "ילד 3"
+    },
+    {
+      "domain": "lh3.googleusercontent.com",
+      "timestamp": "2025-05-27T23:26:08.996237",
+      "was_blocked": false,
+      "child_name": "ילד 3"
+    },
+    {
+      "domain": "lh3.googleusercontent.com",
+      "timestamp": "2025-05-27T23:26:08.997236",
+      "was_blocked": false,
+      "child_name": "ילד 3"
     }
   ]
 }

@@ -1379,11 +1379,11 @@ class ParentServer:
                         del active_connections[child_name]
                 print(f"[-] {child_name} התנתק")
 
-
     def handle_child_communication(self, client_socket, child_name):
         while self.running:
             try:
                 msg_type, data = Protocol.receive_message(client_socket)
+                print(f"[DEBUG] התקבלה הודעה: {msg_type} מ-{child_name}")
 
                 if msg_type == Protocol.GET_DOMAINS:
                     with data_lock:
@@ -1395,16 +1395,21 @@ class ParentServer:
                     with data_lock:
                         children_data[child_name]['last_seen'] = time.time()
                     Protocol.send_message(client_socket, Protocol.ACK)
+                    print(f"[DEBUG] ✅ ACK נשלח ל-{child_name}")
 
                 elif msg_type == Protocol.BROWSING_HISTORY:
-                    # קבלת היסטוריית גלישה מהילד
+                    print(f"[DEBUG] 🎯 התקבלה היסטוריה מ-{child_name}!")
                     child_name_from_data = data.get("child_name")
                     history_entries = data.get("history", [])
+                    print(f"[DEBUG] נתונים: child_name='{child_name_from_data}', entries={len(history_entries)}")
 
                     if child_name_from_data and history_entries:
+                        print(f"[DEBUG] ✅ מוסיף היסטוריה...")
                         add_to_browsing_history(child_name_from_data, history_entries)
                         Protocol.send_message(client_socket, Protocol.ACK)
-                        print(f"[+] התקבלה היסטוריה מ-{child_name}: {len(history_entries)} רשומות")
+                        print(f"[+] ✅ התקבלה היסטוריה מ-{child_name}: {len(history_entries)} רשומות")
+                    else:
+                        print(f"[DEBUG] ❌ נתונים לא תקינים")
 
                 elif msg_type == Protocol.ERROR:
                     print(f"[!] Error from child {child_name}: {data}")
