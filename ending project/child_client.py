@@ -5,12 +5,13 @@ import json
 import threading
 import time
 from urllib.parse import parse_qs
+import re
+from urllib.parse import urlparse
 import subprocess
 from collections import defaultdict
 import platform
 import os
 import ctypes
-import ssl
 import ipaddress
 from protocol import Protocol, COMMUNICATION_PORT
 import http.server
@@ -18,550 +19,12 @@ import socketserver
 from datetime import datetime, timedelta
 import sys
 import webbrowser
-
-# עיצוב מחדש שמתאים לקונספט של שאר האתר
-
-REGISTRATION_HTML_TEMPLATE = '''<!DOCTYPE html>
-<html lang="he" dir="rtl">
-<head>
-    <meta charset="UTF-8">
-    <title>רישום - בקרת הורים</title>
-    <style>
-        body { 
-            font-family: 'Segoe UI', Tahoma, Arial, sans-serif;
-            background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
-            min-height: 100vh;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            padding: 20px;
-            margin: 0;
-        }
-        .form-container {
-            background: white;
-            padding: 50px;
-            border-radius: 15px;
-            max-width: 500px;
-            width: 100%;
-            box-shadow: 0 10px 20px rgba(0,0,0,0.1);
-            text-align: center;
-        }
-        .logo-circle {
-            background-color: #4a6fa5;
-            width: 80px;
-            height: 80px;
-            border-radius: 50%;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 40px;
-            color: white;
-            margin: 0 auto 30px;
-        }
-        h1 {
-            color: #4a6fa5;
-            font-size: 28px;
-            margin: 0 0 20px;
-        }
-        .subtitle {
-            color: #666;
-            font-size: 16px;
-            margin-bottom: 30px;
-        }
-        .form-group {
-            margin-bottom: 25px;
-            text-align: right;
-        }
-        label {
-            display: block;
-            font-weight: bold;
-            margin-bottom: 8px;
-            color: #555;
-            font-size: 16px;
-        }
-        input[type="text"] {
-            width: 100%;
-            padding: 15px;
-            border: 2px solid #e1e8ed;
-            border-radius: 8px;
-            font-size: 16px;
-            box-sizing: border-box;
-            text-align: right;
-        }
-        input[type="text"]:focus {
-            outline: none;
-            border-color: #4a6fa5;
-            box-shadow: 0 0 0 3px rgba(74, 111, 165, 0.1);
-        }
-        .submit-btn {
-            background: #4a6fa5;
-            color: white;
-            padding: 15px 40px;
-            border: none;
-            border-radius: 8px;
-            font-size: 16px;
-            font-weight: bold;
-            cursor: pointer;
-            width: 100%;
-            margin-top: 20px;
-        }
-        .submit-btn:hover {
-            background: #3a5a8a;
-        }
-        .info-text {
-            background: #f8f9fa;
-            padding: 15px;
-            border-radius: 8px;
-            border-left: 4px solid #4a6fa5;
-            margin-top: 20px;
-            font-size: 14px;
-            color: #666;
-        }
-        .message {
-            padding: 15px;
-            border-radius: 8px;
-            margin-bottom: 20px;
-            text-align: center;
-        }
-        .error-message {
-            background-color: #f8d7da;
-            color: #721c24;
-            border: 1px solid #f5c6cb;
-        }
-        .success-message {
-            background-color: #d4edda;
-            color: #155724;
-            border: 1px solid #c3e6cb;
-        }
-        .warning-message {
-            background-color: #fff3cd;
-            color: #856404;
-            border: 1px solid #ffeaa7;
-        }
-    </style>
-</head>
-<body>
-    <div class="form-container">
-        <div class="logo-circle">🛡️</div>
-        <h1>מערכת בקרת הורים</h1>
-        <div class="subtitle">האינטרנט מוגבל עד לרישום במערכת</div>
-
-        {message}
-
-        <form method="post" action="/register">
-            <div class="form-group">
-                <label for="child_name">👶 השם שלך:</label>
-                <input type="text" id="child_name" name="child_name" placeholder="הכנס את השם שלך..." required>
-            </div>
-            <button type="submit" class="submit-btn">🔐 היכנס למערכת</button>
-        </form>
-
-        <div class="info-text">
-            💡 אם השם שלך לא רשום במערכת, בקש מההורים להוסיף אותך דרך לוח הבקרה
-        </div>
-    </div>
-</body>
-</html>'''
-
-BLOCK_HTML_TEMPLATE = '''<!DOCTYPE html>
-<html lang="he" dir="rtl">
-<head>
-    <meta charset="UTF-8">
-    <title>אתר חסום - {child_name}</title>
-    <style>
-        body { 
-            font-family: 'Segoe UI', Tahoma, Arial, sans-serif;
-            background: linear-gradient(135deg, #ff4757, #ff6b6b);
-            min-height: 100vh;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            padding: 20px;
-            margin: 0;
-            color: white;
-        }
-        .child-name-tag {
-            position: fixed;
-            top: 20px;
-            right: 20px;
-            background: rgba(0,0,0,0.8);
-            padding: 10px 20px;
-            border-radius: 25px;
-            font-size: 14px;
-            font-weight: bold;
-        }
-        .block-container {
-            background: rgba(255,255,255,0.1);
-            backdrop-filter: blur(10px);
-            padding: 50px;
-            border-radius: 20px;
-            max-width: 600px;
-            width: 100%;
-            box-shadow: 0 15px 35px rgba(0,0,0,0.3);
-            border: 1px solid rgba(255,255,255,0.2);
-            text-align: center;
-        }
-        .block-icon {
-            background: rgba(255,255,255,0.2);
-            width: 100px;
-            height: 100px;
-            border-radius: 50%;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 50px;
-            margin: 0 auto 30px;
-        }
-        h1 {
-            font-size: 36px;
-            margin: 0 0 20px;
-            font-weight: bold;
-        }
-        .warning-box {
-            background: rgba(255,255,255,0.15);
-            border: 2px solid rgba(255,255,255,0.3);
-            border-radius: 15px;
-            padding: 25px;
-            margin: 30px 0;
-        }
-        .warning-box p {
-            margin: 10px 0;
-            font-size: 18px;
-        }
-        .warning-box strong {
-            font-weight: bold;
-            color: #fff;
-        }
-        .description {
-            font-size: 18px;
-            line-height: 1.6;
-            margin: 20px 0;
-            opacity: 0.9;
-        }
-        .advice {
-            background: rgba(255,255,255,0.1);
-            padding: 20px;
-            border-radius: 10px;
-            margin-top: 30px;
-            font-size: 16px;
-        }
-    </style>
-</head>
-<body>
-    <div class="child-name-tag">{child_name}</div>
-    <div class="block-container">
-        <div class="block-icon">🚫</div>
-        <h1>אתר חסום!</h1>
-
-        <div class="warning-box">
-            <p><strong>אתר:</strong> {host}</p>
-            <p><strong>זמן:</strong> {current_time}</p>
-            <p><strong>ילד:</strong> {child_name}</p>
-        </div>
-
-        <div class="description">
-            הגישה לאתר זה נחסמה על ידי מערכת בקרת ההורים
-        </div>
-
-        <div class="advice">
-            💡 אם אתה חושב שזו טעות או שאתה צריך גישה לאתר זה ללימודים, פנה להורים שלך
-        </div>
-    </div>
-</body>
-</html>'''
-
-
-# הודעות שגיאה והצלחה מעוצבות:
-def create_error_page(title, message, back_button=True, retry_button=False):
-    buttons_html = ""
-
-    if retry_button:
-        buttons_html += '''<button onclick="tryAgain()" class="submit-btn" style="background: #4a6fa5; margin-left: 10px;">נסה שוב</button>'''
-
-    if back_button:
-        buttons_html += '''<button onclick="goBack()" class="submit-btn" style="background: #95a5a6;">חזור</button>'''
-
-    return f'''<!DOCTYPE html>
-<html lang="he" dir="rtl">
-<head>
-    <meta charset="UTF-8">
-    <title>{title}</title>
-    <style>
-        body {{ 
-            font-family: 'Segoe UI', Tahoma, Arial, sans-serif;
-            background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
-            min-height: 100vh;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            padding: 20px;
-            margin: 0;
-        }}
-        .container {{
-            background: white;
-            padding: 50px;
-            border-radius: 15px;
-            max-width: 500px;
-            width: 100%;
-            box-shadow: 0 10px 20px rgba(0,0,0,0.1);
-            text-align: center;
-        }}
-        .icon {{ 
-            font-size: 60px; 
-            margin-bottom: 20px; 
-        }}
-        h1 {{ 
-            color: #e74c3c; 
-            font-size: 24px; 
-            margin-bottom: 20px; 
-        }}
-        p {{ 
-            color: #666; 
-            font-size: 16px; 
-            line-height: 1.6; 
-        }}
-        .submit-btn {{
-            background: #4a6fa5;
-            color: white;
-            padding: 12px 30px;
-            border: none;
-            border-radius: 8px;
-            font-size: 16px;
-            font-weight: bold;
-            cursor: pointer;
-            margin: 10px 5px;
-            display: inline-block;
-        }}
-        .submit-btn:hover {{
-            opacity: 0.9;
-        }}
-        .button-container {{
-            margin-top: 30px;
-        }}
-    </style>
-    <script>
-        function goBack() {{
-            if (window.history.length > 1) {{
-                window.history.back();
-            }} else {{
-                window.location.href = '/';
-            }}
-        }}
-
-        function tryAgain() {{
-            window.location.reload();
-        }}
-
-        // אם אין היסטוריה, הסתר כפתור חזור
-        window.addEventListener('load', function() {{
-            if (window.history.length <= 1) {{
-                var backButtons = document.querySelectorAll('button[onclick*="goBack"]');
-                backButtons.forEach(function(btn) {{
-                    btn.style.display = 'none';
-                }});
-            }}
-        }});
-    </script>
-</head>
-<body>
-    <div class="container">
-        <div class="icon">❌</div>
-        <h1>{title}</h1>
-        <p>{message}</p>
-        <div class="button-container">
-            {buttons_html}
-        </div>
-    </div>
-</body>
-</html>'''
-
-
-def create_success_page(title, message):
-    return f'''<!DOCTYPE html>
-<html lang="he" dir="rtl">
-<head>
-    <meta charset="UTF-8">
-    <title>{title}</title>
-    <style>
-        body {{ 
-            font-family: 'Segoe UI', Tahoma, Arial, sans-serif;
-            background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
-            min-height: 100vh;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            padding: 20px;
-            margin: 0;
-        }}
-        .container {{
-            background: white;
-            padding: 50px;
-            border-radius: 15px;
-            max-width: 500px;
-            width: 100%;
-            box-shadow: 0 10px 20px rgba(0,0,0,0.1);
-            text-align: center;
-        }}
-        .icon {{ font-size: 60px; margin-bottom: 20px; }}
-        h1 {{ color: #28a745; font-size: 24px; margin-bottom: 20px; }}
-        p {{ color: #666; font-size: 16px; line-height: 1.6; }}
-        .highlight {{ background: #d4edda; padding: 15px; border-radius: 8px; margin: 20px 0; border-left: 4px solid #28a745; }}
-    </style>
-</head>
-<body>
-    <div class="container">
-        <div class="icon">🎉</div>
-        <h1>{title}</h1>
-        <div class="highlight">{message}</div>
-        <p>תוכל לסגור את הדף הזה ולהתחיל לגלוש באינטרנט</p>
-    </div>
-</body>
-</html>'''
-
-# הודעות שגיאה והצלחה מעוצבות:
-def create_error_page(title, message, back_button=True, retry_button=False):
-    buttons = ""
-
-    if retry_button:
-        buttons += '''
-        <button onclick="tryAgain()" class="submit-btn" style="background: #4a6fa5; margin-left: 10px;">נסה שוב</button>
-        '''
-
-    if back_button:
-        buttons += '''
-        <button onclick="goBack()" class="submit-btn" style="background: #95a5a6;">חזור</button>
-        '''
-
-    script = '''
-    <script>
-        function goBack() {
-            if (window.history.length > 1) {
-                window.history.back();
-            } else {
-                window.location.href = '/';
-            }
-        }
-
-        function tryAgain() {
-            window.location.reload();
-        }
-
-        // אם אין היסטוריה, הסתר כפתור חזור
-        window.onload = function() {
-            if (window.history.length <= 1) {
-                var backButtons = document.querySelectorAll('button[onclick*="goBack"]');
-                backButtons.forEach(function(btn) {
-                    btn.style.display = 'none';
-                });
-            }
-        }
-    </script>
-    '''
-
-    return f'''<!DOCTYPE html>
-<html lang="he" dir="rtl">
-<head>
-    <meta charset="UTF-8">
-    <title>{title}</title>
-    <style>
-        body {{ 
-            font-family: 'Segoe UI', Tahoma, Arial, sans-serif;
-            background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
-            min-height: 100vh;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            padding: 20px;
-            margin: 0;
-        }}
-        .container {{
-            background: white;
-            padding: 50px;
-            border-radius: 15px;
-            max-width: 500px;
-            width: 100%;
-            box-shadow: 0 10px 20px rgba(0,0,0,0.1);
-            text-align: center;
-        }}
-        .icon {{ font-size: 60px; margin-bottom: 20px; }}
-        h1 {{ color: #e74c3c; font-size: 24px; margin-bottom: 20px; }}
-        p {{ color: #666; font-size: 16px; line-height: 1.6; }}
-        .submit-btn {{
-            background: #4a6fa5;
-            color: white;
-            padding: 12px 30px;
-            border: none;
-            border-radius: 8px;
-            font-size: 16px;
-            font-weight: bold;
-            cursor: pointer;
-            margin: 10px 5px;
-            display: inline-block;
-        }}
-        .submit-btn:hover {{
-            opacity: 0.9;
-        }}
-        .button-container {{
-            margin-top: 30px;
-        }}
-    </style>
-</head>
-<body>
-    <div class="container">
-        <div class="icon">❌</div>
-        <h1>{title}</h1>
-        <p>{message}</p>
-        <div class="button-container">
-            {buttons}
-        </div>
-    </div>
-    {script}
-</body>
-</html>'''
-
-
-def create_success_page(title, message):
-    return f'''<!DOCTYPE html>
-<html lang="he" dir="rtl">
-<head>
-    <meta charset="UTF-8">
-    <title>{title}</title>
-    <style>
-        body {{ 
-            font-family: 'Segoe UI', Tahoma, Arial, sans-serif;
-            background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
-            min-height: 100vh;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            padding: 20px;
-            margin: 0;
-        }}
-        .container {{
-            background: white;
-            padding: 50px;
-            border-radius: 15px;
-            max-width: 500px;
-            width: 100%;
-            box-shadow: 0 10px 20px rgba(0,0,0,0.1);
-            text-align: center;
-        }}
-        .icon {{ font-size: 60px; margin-bottom: 20px; }}
-        h1 {{ color: #28a745; font-size: 24px; margin-bottom: 20px; }}
-        p {{ color: #666; font-size: 16px; line-height: 1.6; }}
-        .highlight {{ background: #d4edda; padding: 15px; border-radius: 8px; margin: 20px 0; border-left: 4px solid #28a745; }}
-    </style>
-</head>
-<body>
-    <div class="container">
-        <div class="icon">🎉</div>
-        <h1>{title}</h1>
-        <div class="highlight">{message}</div>
-        <p>תוכל לסגור את הדף הזה ולהתחיל לגלוש באינטרנט</p>
-    </div>
-</body>
-</html>'''
-
+from html_templats_child import (
+    REGISTRATION_HTML_TEMPLATE,
+    BLOCK_HTML_TEMPLATE,
+    create_error_page,
+    create_success_page
+)
 
 REGISTRATION_FILE = "child_registration.json"
 REGISTRATION_CHECK_INTERVAL = 30
@@ -592,7 +55,6 @@ OBVIOUS_TECHNICAL_PATTERNS = [
 ]
 
 
-# פונקציות לניהול רישום הילד
 def load_registration():
     try:
         with open(REGISTRATION_FILE, 'r', encoding='utf-8') as f:
@@ -665,14 +127,10 @@ def verify_child_with_parent(child_name):
         return False
 
 
-def prompt_for_child_name():
-    # פונקציה זו לא נדרשת יותר - הכל עובר דרך HTML
-    pass
-
 
 def wait_for_registration():
-    print("\n" + "🔐 פותח דף רישום...")
-    print("🌐 דפדפן יפתח אוטומטי עם דף הרישום")
+    print("\n" + " פותח דף רישום...")
+    print(" דפדפן יפתח אוטומטי עם דף הרישום")
 
     # ממתין שהשרת יתחיל לרוץ ויגדיר את הפורט
     time.sleep(3)
@@ -694,8 +152,8 @@ def wait_for_registration():
     except Exception as e:
         print(f"[!] שגיאה בפתיחת דפדפן: {e}")
 
-    print("💡 הזן את השם שלך בטופס שמופיע בדפדפן")
-    print("🔄 אם הדף לא נטען, רענן את הדפדפן")
+    print(" הזן את השם שלך בטופס שמופיע בדפדפן")
+    print(" אם הדף לא נטען, רענן את הדפדפן")
 
     # ממתין עד שהילד יירשם דרך הדפדפן
     max_wait = 300  # 5 דקות
@@ -752,21 +210,143 @@ def block_all_internet():
     print("[!] 🔒 אינטרנט חסום - ילד לא רשום!")
 
 
+def extract_main_site_name(domain):
+    """
+    מחלץ את השם הראשי של האתר מכל דומיין
+    """
+    if not domain:
+        return domain
+
+    # ניקוי הדומיין
+    domain = domain.lower().strip()
+
+    # הסרת פרוטוקול אם קיים
+    if '://' in domain:
+        domain = urlparse(domain).netloc or domain
+
+    # הסרת פורט
+    if ':' in domain:
+        domain = domain.split(':')[0]
+
+    # הסרת תת-דומיינים טכניים נפוצים
+    technical_subdomains = [
+        'www', 'www2', 'www3', 'm', 'mobile', 'api', 'cdn', 'static',
+        'assets', 'img', 'images', 'css', 'js', 'analytics', 'tracking',
+        'ads', 'ad', 'media', 'content', 'secure', 'ssl', 'login',
+        'auth', 'oauth', 'sso', 'mail', 'email', 'smtp', 'pop', 'imap'
+    ]
+
+    parts = domain.split('.')
+
+    # אם יש רק 2 חלקים (name.com) - זה הדומיין הראשי
+    if len(parts) <= 2:
+        return domain
+
+    # הסרת תת-דומיינים טכניים
+    while len(parts) > 2 and parts[0] in technical_subdomains:
+        parts = parts[1:]
+
+    # טיפול בדומיינים ישראליים ובינלאומיים
+    common_tlds = [
+        'co.il', 'ac.il', 'gov.il', 'org.il', 'net.il',
+        'com.au', 'co.uk', 'co.za', 'com.br'
+    ]
+
+    # בדיקה אם יש TLD מורכב
+    if len(parts) >= 3:
+        last_two = '.'.join(parts[-2:])
+        if last_two in common_tlds:
+            # TLD מורכב - נשמור 3 חלקים אחרונים
+            if len(parts) >= 3:
+                return '.'.join(parts[-3:])
+
+    # במקרה הרגיל - נשמור 2 חלקים אחרונים
+    return '.'.join(parts[-2:])
+
+
+def get_site_display_name(domain):
+    """
+    מחזיר שם תצוגה נחמד לאתר
+    """
+    main_domain = extract_main_site_name(domain)
+
+    if not main_domain:
+        return domain
+
+    # חילוץ השם בלבד (ללא סיומת)
+    parts = main_domain.split('.')
+    if len(parts) >= 2:
+        site_name = parts[0]  # החלק הראשון
+
+        # שיפור התצוגה
+        site_name = site_name.replace('-', ' ').replace('_', ' ')
+
+        # קפיטליזציה
+        if len(site_name) <= 3:
+            # אתרים קצרים - כל האותיות גדולות
+            site_name = site_name.upper()
+        else:
+            # אתרים ארוכים - רק האות הראשונה גדולה
+            site_name = site_name.capitalize()
+
+        return site_name
+
+    return main_domain
+
+
 def is_obviously_technical(domain):
+    """
+    בודק אם הדומיין הוא טכני/פרסומי ולא מעניין להורים
+    """
     domain_lower = domain.lower()
-    for pattern in OBVIOUS_TECHNICAL_PATTERNS:
+
+    # דפוסים טכניים ברורים
+    technical_patterns = [
+        'analytics', 'tracking', 'ads', 'doubleclick', 'googletagmanager',
+        'cdn', 'cache', 'static', 'assets', 'edge', 'akamai', 'cloudflare',
+        'api', 'ws', 'websocket', 'ajax', 'xhr', 'heartbeat', 'status',
+        'telemetry', 'metrics', 'logs', 'monitoring', 'beacon',
+        'googlesyndication', 'googleadservices', 'facebook.com/tr',
+        'connect.facebook.net', 'platform.twitter.com'
+    ]
+
+    for pattern in technical_patterns:
         if pattern in domain_lower:
             return True
+
+    # תת-דומיינים ארוכים מדי (סימן לטכני)
+    parts = domain_lower.split('.')
+    if len(parts) > 4:  # יותר מדי תת-דומיינים
+        return True
+
+    # בדיקת דומיינים קצרים מדי או ארוכים מדי
+    main_part = parts[0] if parts else ''
+    if len(main_part) < 2 or len(main_part) > 20:
+        return True
+
+    # דומיינים שהם רק מספרים או תווים מוזרים
+    if re.match(r'^[0-9\-_]+$', main_part):
+        return True
+
     return False
 
 
 def add_to_history(domain, timestamp, was_blocked=False):
+    """הוספת רשומה להיסטוריה עם שם תצוגה חכם"""
+
+    # דילוג על דומיינים טכניים
     if is_obviously_technical(domain):
         return
 
+    # חילוץ שם האתר הראשי
+    main_domain = extract_main_site_name(domain)
+    display_name = get_site_display_name(domain)
+
     with history_lock:
         entry = {
-            "domain": domain,
+            "original_domain": domain,  # הדומיין המקורי המלא
+            "main_domain": main_domain,  # הדומיין הראשי
+            "display_name": display_name,  # השם לתצוגה
             "timestamp": timestamp,
             "was_blocked": was_blocked,
             "child_name": CHILD_NAME
@@ -774,8 +354,8 @@ def add_to_history(domain, timestamp, was_blocked=False):
         browsing_history.append(entry)
         if len(browsing_history) > MAX_HISTORY_ENTRIES:
             browsing_history.pop(0)
-        print(f"[HISTORY] ✅ נוסף: {domain} ({'חסום' if was_blocked else 'מותר'})")
 
+        print(f"[HISTORY]  נוסף: {display_name} ({main_domain}) ({'חסום' if was_blocked else 'מותר'})")
 
 
 def send_history_update():
@@ -1109,32 +689,16 @@ class DNSManager:
         return False
 
 
-# שיפור פונקציית הסגירה:
 def graceful_shutdown():
-    print("\n" + "=" * 60)
-    print("🔄 מתחיל סגירה נקייה של המערכת...")
-    print("=" * 60)
-
+    print("\n🔄 מתחיל סגירה נקייה...")
     try:
-        # עצירת client
-        if hasattr(child_client, 'keep_running'):
-            child_client.keep_running = False
-            print("[*] עוצר client...")
-
-        # שחזור DNS
         print("[*] משחזר הגדרות DNS מקוריות...")
         if dns_manager.restore_original_dns():
             print("[+] ✅ DNS שוחזר בהצלחה")
         else:
-            print("[!] ⚠️ יתכן שצריך לשחזר DNS ידנית")
-            print("💡 במקרה בעיה: הגדרות רשת → שנה מתאם → מאפיינים → TCP/IPv4 → קבל DNS אוטומטית")
-
-        print("[+] ✅ מערכת נסגרה בהצלחה")
-        print("=" * 60)
-
+            print("[!] ❌ כישלון בשחזור DNS")
     except Exception as e:
-        print(f"[!] ❌ שגיאה בסגירה: {e}")
-        print("💡 יתכן שתצטרך לשחזר הגדרות DNS ידנית")
+        print(f"[!] שגיאה בסגירה: {e}")
 
 
 class ChildClient:
