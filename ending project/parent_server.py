@@ -207,12 +207,17 @@ def load_browsing_history():
     """טעינת היסטוריית גלישה מקובץ"""
     global browsing_history
     try:
-        with open('browsing_history.json', 'r', encoding='utf-8') as f:
-            browsing_history = json.load(f)
-            print(f"[*] נטענה היסטוריית גלישה עבור {len(browsing_history)} ילדים")
-    except FileNotFoundError:
-        browsing_history = {}
-        print("[*] נוצר קובץ היסטוריה חדש")
+        try:
+            with open('browsing_history.json', 'r', encoding='utf-8') as f:
+                browsing_history = json.load(f)
+                print(f"[DEBUG LOAD] טעינת היסטוריה: {len(browsing_history)} ילדים")
+                for child, entries in browsing_history.items():
+                    print(f"[DEBUG LOAD] {child}: {len(entries)} רשומות")
+                    if entries:
+                        print(f"[DEBUG LOAD] דוגמה אחרונה: {entries[-1]}")
+        except FileNotFoundError:
+           browsing_history = {}
+           print("[*] נוצר קובץ היסטוריה חדש")
     except Exception as e:
         print(f"[!] שגיאה בטעינת היסטוריה: {e}")
         browsing_history = {}
@@ -617,7 +622,11 @@ class ParentHandler(http.server.SimpleHTTPRequestHandler):
             filtered_history = []
             total_entries = 0
             stats = {'blocked': 0, 'allowed': 0, 'total_children': 0}
-
+            print(f"[DEBUG VIEW] כל ההיסטוריה:")
+            for child_name, entries in browsing_history.items():
+                print(f"[DEBUG VIEW] {child_name}: {len(entries)} רשומות")
+                if entries:
+                    print(f"[DEBUG VIEW] אחרונה: {entries[-1]}")
             with history_lock:
                 stats['total_children'] = len(browsing_history)
                 for child_name, entries in browsing_history.items():

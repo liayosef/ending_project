@@ -52,6 +52,8 @@ OBVIOUS_TECHNICAL_PATTERNS = [
     'analytics', 'tracking', 'ads', 'doubleclick', 'googletagmanager',
     'cdn', 'cache', 'static', 'assets', 'edge', 'akamai', 'cloudflare',
     'api', 'ws', 'websocket', 'ajax', 'xhr', 'heartbeat', 'status',
+    'clarity.ms', 'mktoresp.com', 'optimizely.com', 'googlezip.net',
+    'heyday', 'jquery.com', 'rss.app', 'gostreaming.tv','google.com'
 ]
 
 
@@ -265,9 +267,18 @@ def extract_main_site_name(domain):
 
 
 def get_site_display_name(domain):
-    """
-    מחזיר שם תצוגה נחמד לאתר
-    """
+    # בדיקה במיפוי הישראלי קודם
+    if 'ebag.cet.ac.il' in domain:
+        return 'אופק על יסודי'
+    elif 'cet.ac.il' in domain and 'ebag' not in domain:
+        return 'מטח'
+    elif 'ynet.co.il' in domain:
+        return 'Ynet'
+    elif 'walla.co.il' in domain:
+        return 'וואלה'
+    elif 'mako.co.il' in domain:
+        return 'מאקו'
+
     main_domain = extract_main_site_name(domain)
 
     if not main_domain:
@@ -332,31 +343,32 @@ def is_obviously_technical(domain):
 
 
 def add_to_history(domain, timestamp, was_blocked=False):
-    """הוספת רשומה להיסטוריה עם שם תצוגה חכם"""
+    """הוספת רשומה להיסטוריה - פשוט וללא סינון יתר"""
 
-    # דילוג על דומיינים טכניים
+    # דילוג רק על דומיינים טכניים ברורים
     if is_obviously_technical(domain):
         return
 
-    # חילוץ שם האתר הראשי
+    # חילוץ שם האתר
     main_domain = extract_main_site_name(domain)
     display_name = get_site_display_name(domain)
 
     with history_lock:
         entry = {
-            "original_domain": domain,  # הדומיין המקורי המלא
-            "main_domain": main_domain,  # הדומיין הראשי
-            "display_name": display_name,  # השם לתצוגה
+            "original_domain": domain,
+            "main_domain": main_domain,
+            "display_name": display_name,
             "timestamp": timestamp,
             "was_blocked": was_blocked,
             "child_name": CHILD_NAME
         }
+
         browsing_history.append(entry)
+
         if len(browsing_history) > MAX_HISTORY_ENTRIES:
             browsing_history.pop(0)
 
-        print(f"[HISTORY]  נוסף: {display_name} ({main_domain}) ({'חסום' if was_blocked else 'מותר'})")
-
+        print(f"[HISTORY] ✅ נוסף: {display_name} ({main_domain}) ({'חסום' if was_blocked else 'מותר'})")
 
 def send_history_update():
     print(f"[DEBUG] 🔍 send_history_update נקראה!")
@@ -833,7 +845,7 @@ class ChildClient:
                     send_history_update()
                 except:
                     self.connected = False
-            time.sleep(30)
+            time.sleep(3)
 
 
 child_client = ChildClient()
@@ -964,51 +976,32 @@ def start_dns_proxy():
         print("[*] השרת נסגר.")
 
 
-def graceful_shutdown():
-    print("\n" + "=" * 60)
-    print("🔄 מתחיל סגירה נקייה של המערכת...")
-    print("=" * 60)
-
-    try:
-        if hasattr(child_client, 'keep_running'):
-            child_client.keep_running = False
-
-        print("[*] משחזר הגדרות DNS מקוריות...")
-        dns_manager.restore_original_dns()
-
-        print("[+] ✅ מערכת נסגרה בהצלחה")
-        print("=" * 60)
-
-    except Exception as e:
-        print(f"[!] ❌ שגיאה בסגירה: {e}")
-
-
 def display_startup_messages():
     print("\n" + "=" * 70)
-    print("🛡️  מערכת בקרת הורים - ילד")
+    print("🛡  מערכת בקרת הורים - ילד")
     print("=" * 70)
-    print(f"👶 ילד: {CHILD_NAME}")
-    print(f"🔒 מצב: {'רשום במערכת' if CHILD_NAME else 'לא רשום - אינטרנט חסום'}")
-    print(f"🌐 DNS: 127.0.0.1 (מקומי)")
-    print(f"📡 שרת הורים: {PARENT_SERVER_IP}:{COMMUNICATION_PORT}")
+    print(f" ילד: {CHILD_NAME}")
+    print(f" מצב: {'רשום במערכת' if CHILD_NAME else 'לא רשום - אינטרנט חסום'}")
+    print(f" DNS: 127.0.0.1 (מקומי)")
+    print(f" שרת הורים: {PARENT_SERVER_IP}:{COMMUNICATION_PORT}")
     print("=" * 70)
     if CHILD_NAME:
-        print("✅ המערכת פועלת - אינטרנט זמין עם חסימות")
+        print(" המערכת פועלת - אינטרנט זמין עם חסימות")
     else:
-        print("❌ נדרש רישום - אינטרנט חסום לחלוטין")
+        print(" נדרש רישום - אינטרנט חסום לחלוטין")
     print("=" * 70)
 
 
 if __name__ == "__main__":
     try:
-        print("\n🚀 מתחיל מערכת בקרת הורים...")
+        print("\n מתחיל מערכת בקרת הורים...")
 
         print("[*] בודק רישום קיים...")
         if check_child_registration():
-            print(f"[+] ✅ נמצא רישום: {CHILD_NAME}")
+            print(f"[+]  נמצא רישום: {CHILD_NAME}")
         else:
-            print("[!] ⚠️ לא נמצא רישום תקף")
-            print("[*] 🌐 מכין דף רישום...")
+            print("[!]  לא נמצא רישום תקף")
+            print("[*]  מכין דף רישום...")
 
             # הפעלת שרת החסימה לפני הרישום
             print("[*] מפעיל שרת דף רישום...")

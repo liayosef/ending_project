@@ -3,7 +3,7 @@ import socket
 import struct
 
 # פורט תקשורת בין הורה לילד
-COMMUNICATION_PORT = 5009
+COMMUNICATION_PORT = 5002
 
 
 class Protocol:
