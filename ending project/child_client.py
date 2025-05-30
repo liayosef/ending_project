@@ -232,13 +232,32 @@ def verify_child_with_parent(child_name):
 
 
 def wait_for_registration():
-    print("\n" + " פותח דף רישום...")
-    print(" דפדפן יפתח אוטומטי עם דף הרישום")
+    print("\n🔧 מכין דף רישום...")
+    print("⏳ ממתין שהשרת יהיה מוכן...")
 
-    # ממתין שהשרת יתחיל לרוץ ויגדיר את הפורט
-    time.sleep(3)
+    # ⚠️ חשוב! תן לשרת זמן להתחיל
+    time.sleep(2)  # במקום 3 שניות
 
-    # פתיחת דפדפן עם הפורט הנכון
+    # 🆕 בדוק שהשרת באמת מוכן
+    max_attempts = 10
+    for i in range(max_attempts):
+        try:
+            # ניסיון חיבור מהיר לבדיקה
+            test_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            test_sock.settimeout(0.5)
+            result = test_sock.connect_ex(('127.0.0.1', BLOCK_SERVER_PORT))
+            test_sock.close()
+
+            if result == 0:
+                print("[✅] השרת מוכן!")
+                break
+        except:
+            pass
+
+        print(f"[⏳] ממתין לשרת... ({i + 1}/{max_attempts})")
+        time.sleep(0.5)
+
+    # עכשיו פתח את הדפדפן
     try:
         if BLOCK_SERVER_PORT:
             if BLOCK_SERVER_PORT == 80:
@@ -248,31 +267,28 @@ def wait_for_registration():
 
             print(f"🌐 פותח דפדפן: {registration_url}")
             webbrowser.open(registration_url)
-            time.sleep(2)
+            print("📝 הזן את השם שלך בטופס שמופיע בדפדפן")
         else:
             print("[!] שרת לא הצליח להתחיל")
             return False
     except Exception as e:
         print(f"[!] שגיאה בפתיחת דפדפן: {e}")
 
-    print(" הזן את השם שלך בטופס שמופיע בדפדפן")
-    print(" אם הדף לא נטען, רענן את הדפדפן")
-
-    # ממתין עד שהילד יירשם דרך הדפדפן
-    max_wait = 300  # 5 דקות
+    # שאר הקוד נשאר אותו דבר...
+    max_wait = 300
     waited = 0
 
     while not CHILD_NAME and waited < max_wait:
         time.sleep(5)
         waited += 5
 
-        if waited % 30 == 0:  # הודעה כל 30 שניות
+        if waited % 30 == 0:
             print(f"[*] ממתין לרישום... ({waited}/{max_wait} שניות)")
             if BLOCK_SERVER_PORT:
                 if BLOCK_SERVER_PORT == 80:
-                    print(f"[*]  נסה לגשת ל: http://127.0.0.1")
+                    print(f"[*] 🔗 נסה לגשת ל: http://127.0.0.1")
                 else:
-                    print(f"[*]  נסה לגשת ל: http://127.0.0.1:{BLOCK_SERVER_PORT}")
+                    print(f"[*] 🔗 נסה לגשת ל: http://127.0.0.1:{BLOCK_SERVER_PORT}")
 
     if CHILD_NAME:
         print(f"\n🎉 רישום הושלם דרך הדפדפן!")
@@ -281,7 +297,6 @@ def wait_for_registration():
     else:
         print("\n❌ תם הזמן לרישום")
         return False
-
 
 def periodic_registration_check():
     global CHILD_NAME
@@ -1047,13 +1062,18 @@ def start_dns_proxy():
                 threading.Thread(target=handle_dns_request, args=(data, addr, sock), daemon=True).start()
             except Exception as e:
                 print(f"[!] שגיאה בטיפול בבקשה: {e}")
+                # 🆕 המשך במקום לקרוס!
+                continue
     except KeyboardInterrupt:
         print("\n[*] עצירת השרת על ידי המשתמש.")
+    except Exception as e:  # 🆕 תפוס כל שגיאה!
+        print(f"\n[!] שגיאה קריטית ב-DNS Proxy: {e}")
     finally:
         sock.close()
         print("[*] משחזר הגדרות DNS מקוריות...")
         dns_manager.restore_original_dns()
         print("[*] השרת נסגר.")
+
 
 
 def display_startup_messages():
@@ -1151,14 +1171,18 @@ if __name__ == "__main__":
         print("🛑 לחץ Ctrl+C לעצירת המערכת")
         print("=" * 70)
 
-        start_dns_proxy()
+        try:
+            start_dns_proxy()
+        except Exception as dns_error:
+            print(f"[!] שגיאה ב-DNS Proxy: {dns_error}")
+        # אל תקרוס - תמשיך לגרייספול שאטדאון
 
     except KeyboardInterrupt:
         print("\n🛑 התקבלה בקשת עצירה...")
-        graceful_shutdown()
     except Exception as e:
         print(f"\n[!] ❌ שגיאה קריטית: {e}")
-        graceful_shutdown()
-        sys.exit(1)
     finally:
+        # 🆕 כעת זה יתבצע תמיד!
+        print("[*] 🔄 מתחיל סגירה סופית...")
+        graceful_shutdown()
         network_manager.cleanup_all()
