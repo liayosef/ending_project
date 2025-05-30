@@ -4,7 +4,6 @@ import json
 from contextlib import contextmanager
 import threading
 import time
-from urllib.parse import parse_qs
 import re
 from urllib.parse import urlparse
 import subprocess
@@ -12,12 +11,9 @@ from collections import defaultdict
 import platform
 import os
 import ctypes
-import ipaddress
 from protocol import Protocol, COMMUNICATION_PORT
-import http.server
-import socketserver
 import socket
-from datetime import datetime, timedelta
+from datetime import datetime
 import sys
 import webbrowser
 from html_templats_child import (
@@ -26,6 +22,7 @@ from html_templats_child import (
     create_error_page,
     create_success_page
 )
+from custom_http_server import ParentalControlHTTPServer
 
 REGISTRATION_FILE = "child_registration.json"
 REGISTRATION_CHECK_INTERVAL = 30
@@ -37,9 +34,8 @@ BLOCK_PAGE_IP = "127.0.0.1"
 PARENT_SERVER_IP = "127.0.0.1"
 BLOCKED_DOMAINS = set()
 ORIGINAL_DNS = None
-
 BLOCK_SERVER_PORT = None
-
+custom_http_server = None
 browsing_history = []
 history_lock = threading.Lock()
 MAX_HISTORY_ENTRIES = 1000
@@ -298,6 +294,7 @@ def wait_for_registration():
         print("\n❌ תם הזמן לרישום")
         return False
 
+
 def periodic_registration_check():
     global CHILD_NAME
     while True:
@@ -508,125 +505,6 @@ def send_history_update():
         print(f"[DEBUG] - history: {len(browsing_history)} רשומות")
 
 
-class BlockHandler(http.server.BaseHTTPRequestHandler):
-    def do_GET(self):
-        try:
-            self.send_response(200)
-            self.send_header('Content-type', 'text/html; charset=utf-8')
-            self.end_headers()
-
-            # אם הילד לא רשום - הצג דף רישום
-            if not CHILD_NAME:
-                registration_html = REGISTRATION_HTML_TEMPLATE.replace('{message}', '')
-                self.wfile.write(registration_html.encode('utf-8'))
-                return
-
-            # אם הילד רשום - הצג דף חסימה מעוצב
-            current_time = time.strftime('%H:%M:%S')
-            host = self.headers.get('Host', 'לא ידוע')
-
-            block_html = BLOCK_HTML_TEMPLATE.format(
-                child_name=CHILD_NAME,
-                host=host,
-                current_time=current_time
-            )
-            self.wfile.write(block_html.encode('utf-8'))
-
-        except Exception as e:
-            print(f"[!] שגיאה בטיפול בבקשת HTTP: {e}")
-            # דף שגיאה פשוט
-            error_html = create_error_page("שגיאה במערכת", "נסה לרענן את הדף", False)
-            try:
-                self.wfile.write(error_html.encode('utf-8'))
-            except:
-                pass
-
-    def do_POST(self):
-        if self.path == '/register':
-            try:
-                content_length = int(self.headers['Content-Length'])
-                post_data = self.rfile.read(content_length)
-
-                from urllib.parse import parse_qs
-                form_data = parse_qs(post_data.decode('utf-8'))
-                child_name = form_data.get('child_name', [''])[0].strip()
-
-                print(f"[*] בקשת רישום מהדפדפן: '{child_name}'")
-
-                if not child_name:
-                    error_html = create_error_page("שגיאה", "השם לא יכול להיות ריק!", back_button=True,
-                                                   retry_button=True)
-                    self.send_response(200)
-                    self.send_header('Content-type', 'text/html; charset=utf-8')
-                    self.end_headers()
-                    self.wfile.write(error_html.encode('utf-8'))
-                    return
-
-                if len(child_name) < 2:
-                    error_html = create_error_page("שגיאה", "השם חייב להכיל לפחות 2 תווים!", back_button=True,
-                                                   retry_button=True)
-                    self.send_response(200)
-                    self.send_header('Content-type', 'text/html; charset=utf-8')
-                    self.end_headers()
-                    self.wfile.write(error_html.encode('utf-8'))
-                    return
-
-                # בדיקה אם הילד רשום במערכת
-                if verify_child_with_parent(child_name):
-                    # הילד רשום! שמירה והצלחה
-                    save_registration(child_name)
-                    global CHILD_NAME
-                    CHILD_NAME = child_name
-
-                    # עדכון שם הילד בclient
-                    child_client.child_name = CHILD_NAME
-
-                    # דף הצלחה מעוצב
-                    success_html = create_success_page(
-                        f"ברוך הבא {child_name}!",
-                        " נרשמת בהצלחה במערכת בקרת ההורים<br> כעת תוכל לגלוש באינטרנט בבטחה"
-                    )
-
-                    self.send_response(200)
-                    self.send_header('Content-type', 'text/html; charset=utf-8')
-                    self.end_headers()
-                    self.wfile.write(success_html.encode('utf-8'))
-
-                    print(f"[+]  ילד נרשם בהצלחה דרך הדפדפן: {child_name}")
-                    return
-
-                else:
-                    # הילד לא רשום במערכת
-                    error_html = create_error_page(
-                        "לא רשום במערכת",
-                        f"השם '{child_name}' לא רשום במערכת בקרת ההורים.<br>💡 בקש מההורים להוסיף אותך דרך לוח הבקרה.",
-                        back_button=True,
-                        retry_button=True
-                    )
-                    self.send_response(200)
-                    self.send_header('Content-type', 'text/html; charset=utf-8')
-                    self.end_headers()
-                    self.wfile.write(error_html.encode('utf-8'))
-                    return
-
-            except Exception as e:
-                print(f"[!] שגיאה בטיפול בטופס רישום: {e}")
-                error_html = create_error_page(
-                    "שגיאה במערכת",
-                    "אירעה שגיאה בעת עיבוד הבקשה.<br>נסה שוב או פנה לתמיכה טכנית."
-                )
-                self.send_response(200)
-                self.send_header('Content-type', 'text/html; charset=utf-8')
-                self.end_headers()
-                self.wfile.write(error_html.encode('utf-8'))
-        else:
-            # בקשת POST אחרת - הפנייה לדף הרישום
-            self.do_GET()
-
-    def log_message(self, format, *args):
-        # השתק הודעות לוג של HTTP
-        return
-
 
 def clear_dns_cache():
     print("[*] מנקה DNS cache...")
@@ -641,38 +519,60 @@ def clear_dns_cache():
 
 
 def start_block_server():
-    def start_http_server():
-        global BLOCK_SERVER_PORT
-        # נסה קודם פורט 80, ואם לא אז 8080
+    global BLOCK_SERVER_PORT, custom_http_server
+
+    print("[*] מפעיל שרת HTTP מותאם אישית...")
+
+    for port in [80, 8080]:
         try:
-            with socketserver.TCPServer(("127.0.0.1", 80), BlockHandler) as httpd:
-                BLOCK_SERVER_PORT = 80
-                print("[+] שרת חסימה HTTP פועל על פורט 80")
-                httpd.serve_forever()
-        except PermissionError:
-            try:
-                with socketserver.TCPServer(("127.0.0.1", 8080), BlockHandler) as httpd:
-                    BLOCK_SERVER_PORT = 8080
-                    print("[+] שרת חסימה HTTP פועל על פורט 8080")
-                    httpd.serve_forever()
-            except Exception as e:
-                print(f"[!] שגיאה בשרת HTTP: {e}")
-                BLOCK_SERVER_PORT = None
+            custom_http_server = ParentalControlHTTPServer("127.0.0.1", port)
 
-    print("[*] מפעיל שרת חסימה...")
-    global BLOCK_SERVER_PORT
+            # הגדרת התבניות
+            custom_http_server.set_templates(REGISTRATION_HTML_TEMPLATE, BLOCK_HTML_TEMPLATE)
+
+            # הגדרת פונקציית האימות
+            custom_http_server.set_verify_callback(verify_child_with_parent_callback)
+
+            # 🎨 הגדרת הפונקציות המעוצבות שלך:
+            custom_http_server.set_external_functions(create_error_page, create_success_page)
+
+            # הפעלת השרת בthread נפרד
+            server_thread = threading.Thread(target=custom_http_server.start_server, daemon=True)
+            server_thread.start()
+            time.sleep(0.5)
+
+            BLOCK_SERVER_PORT = port
+            print(f"[+] שרת HTTP מותאם אישית פועל על פורט {port}")
+            return port
+
+        except Exception as e:
+            print(f"[!] שגיאה בפורט {port}: {e}")
+            custom_http_server = None
+            continue
+
+    print("[!] כישלון בהפעלת שרת HTTP")
     BLOCK_SERVER_PORT = None
+    return None
 
-    http_thread = threading.Thread(target=start_http_server, daemon=True)
-    http_thread.start()
 
-    # ממתין עד שהשרת יתחיל ויגדיר את הפורט
-    for i in range(10):  # ממתין עד 5 שניות
-        time.sleep(0.5)
-        if BLOCK_SERVER_PORT is not None:
-            break
+def verify_child_with_parent_callback(child_name):
+    """פונקציית callback לשרת HTTP"""
+    try:
+        success = verify_child_with_parent(child_name)
+        if success:
+            global CHILD_NAME
+            CHILD_NAME = child_name
+            save_registration(child_name)
 
-    return BLOCK_SERVER_PORT
+            if custom_http_server and hasattr(custom_http_server, 'set_child_data'):
+                custom_http_server.set_child_data(child_name)
+
+            child_client.child_name = CHILD_NAME
+
+        return success
+    except Exception as e:
+        print(f"[!] שגיאה באימות callback: {e}")
+        return False
 
 
 class DNSManager:
@@ -1073,7 +973,6 @@ def start_dns_proxy():
         print("[*] משחזר הגדרות DNS מקוריות...")
         dns_manager.restore_original_dns()
         print("[*] השרת נסגר.")
-
 
 
 def display_startup_messages():
