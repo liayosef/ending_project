@@ -37,19 +37,17 @@ history_lock = threading.Lock()
 def create_ssl_certificate():
     """יצירת תעודת SSL לשרת ההורים"""
     if os.path.exists("parent_cert.pem") and os.path.exists("parent_key.pem"):
-        print("[*] ✅ תעודת SSL כבר קיימת")
+        print("[*]  תעודת SSL כבר קיימת")
         return True
 
     try:
         print("[*] יוצר תעודת SSL לשרת ההורים...")
 
-        # יצירת מפתח פרטי
         private_key = rsa.generate_private_key(
             public_exponent=65537,
             key_size=2048,
         )
 
-        # יצירת תעודה
         subject = issuer = x509.Name([
             x509.NameAttribute(NameOID.COUNTRY_NAME, "IL"),
             x509.NameAttribute(NameOID.ORGANIZATION_NAME, "Parent Control Server"),
@@ -88,11 +86,11 @@ def create_ssl_certificate():
                 encryption_algorithm=serialization.NoEncryption()
             ))
 
-        print("[+] ✅ תעודת SSL נוצרה: parent_cert.pem, parent_key.pem")
+        print("[+]  תעודת SSL נוצרה: parent_cert.pem, parent_key.pem")
         return True
 
     except ImportError:
-        print("[!] ⚠️  ספריית cryptography לא זמינה")
+        print("[!]   ספריית cryptography לא זמינה")
         print("[!] הרץ: pip install cryptography")
         return create_fallback_cert()
     except Exception as e:
@@ -120,7 +118,7 @@ MIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQDMQiXPRhmA3O2M
             f.write(cert_content)
         with open("parent_key.pem", "w") as f:
             f.write(key_content)
-        print("[+] ✅ תעודת SSL בסיסית נוצרה")
+        print("[+]  תעודת SSL בסיסית נוצרה")
         return True
     except:
         return False
@@ -410,9 +408,9 @@ class ParentServer:
                 Protocol.send_message(client_socket, Protocol.VERIFY_RESPONSE, {"is_valid": is_valid})
                 print(f"[VERIFY] תגובה ל-'{requested_child}': {'✅ תקף' if is_valid else '❌ לא תקף'}")
 
-                # ⚠️ חשוב! לא לסגור את החיבור כאן אם הילד תקף
+
                 if is_valid:
-                    # עדכון פרטי הילד
+
                     with data_lock:
                         children_data[requested_child]['client_address'] = address
                         children_data[requested_child]['last_seen'] = time.time()
@@ -421,7 +419,6 @@ class ParentServer:
                     active_connections[requested_child] = {"socket": client_socket, "address": address}
                     print(f"[+] ילד '{requested_child}' אומת ונרשם")
 
-                    # ⚠️ כאן הייתה הבעיה - לא היינו ממשיכים לטפל בתקשורת!
                     self.handle_child_communication(client_socket, child_name)
                 else:
                     # אם הילד לא תקף, סוגרים את החיבור
@@ -474,7 +471,7 @@ class ParentServer:
                         Protocol.send_message(client_socket, Protocol.ACK)
                         print(f"[+]  התקבלה היסטוריה מ-{child_name}: {len(history_entries)} רשומות")
                     else:
-                        print(f"[DEBUG] ❌ נתונים לא תקינים")
+                        print(f"[DEBUG]  נתונים לא תקינים")
 
                 elif msg_type == Protocol.ERROR:
                     print(f"[!] Error from child {child_name}: {data}")

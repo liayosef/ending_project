@@ -53,7 +53,7 @@ OBVIOUS_TECHNICAL_PATTERNS = [
     'cdn', 'cache', 'static', 'assets', 'edge', 'akamai', 'cloudflare',
     'api', 'ws', 'websocket', 'ajax', 'xhr', 'heartbeat', 'status',
     'clarity.ms', 'mktoresp.com', 'optimizely.com', 'googlezip.net',
-    'heyday', 'jquery.com', 'rss.app', 'gostreaming.tv','google.com'
+    'heyday', 'jquery.com', 'rss.app', 'gostreaming.tv', 'google.com','microsoft.com'
 ]
 
 
@@ -92,10 +92,10 @@ def check_child_registration():
     if saved_name and is_registered:
         if verify_child_with_parent(saved_name):
             CHILD_NAME = saved_name
-            print(f"[+] ✅ ילד רשום: {CHILD_NAME}")
+            print(f"[+]  ילד רשום: {CHILD_NAME}")
             return True
         else:
-            print(f"[!] ⚠️ רישום של '{saved_name}' לא תקף יותר")
+            print(f"[!] רישום של '{saved_name}' לא תקף יותר")
             try:
                 os.remove(REGISTRATION_FILE)
             except:
@@ -117,17 +117,16 @@ def verify_child_with_parent(child_name):
         is_valid = data.get("is_valid", False)
 
         sock.close()
-        print(f"[DEBUG] ✅ סגרתי חיבור אימות")
+        print(f"[DEBUG]  סגרתי חיבור אימות")
         return is_valid
 
     except Exception as e:
         print(f"[!] שגיאה באימות: {e}")
         try:
-            sock.close()  # גם כאן!
+            sock.close()
         except:
             pass
         return False
-
 
 
 def wait_for_registration():
@@ -169,9 +168,9 @@ def wait_for_registration():
             print(f"[*] ממתין לרישום... ({waited}/{max_wait} שניות)")
             if BLOCK_SERVER_PORT:
                 if BLOCK_SERVER_PORT == 80:
-                    print(f"[*] 💡 נסה לגשת ל: http://127.0.0.1")
+                    print(f"[*]  נסה לגשת ל: http://127.0.0.1")
                 else:
-                    print(f"[*] 💡 נסה לגשת ל: http://127.0.0.1:{BLOCK_SERVER_PORT}")
+                    print(f"[*]  נסה לגשת ל: http://127.0.0.1:{BLOCK_SERVER_PORT}")
 
     if CHILD_NAME:
         print(f"\n🎉 רישום הושלם דרך הדפדפן!")
@@ -189,8 +188,8 @@ def periodic_registration_check():
             time.sleep(REGISTRATION_CHECK_INTERVAL)
             if CHILD_NAME:
                 if not verify_child_with_parent(CHILD_NAME):
-                    print(f"[!] ⚠️ הילד '{CHILD_NAME}' לא רשום יותר במערכת!")
-                    print("[!] 🔒 חוזר למצב חסימה מלאה...")
+                    print(f"[!]  הילד '{CHILD_NAME}' לא רשום יותר במערכת!")
+                    print("[!]  חוזר למצב חסימה מלאה...")
                     try:
                         os.remove(REGISTRATION_FILE)
                     except:
@@ -209,7 +208,7 @@ def block_all_internet():
         "microsoft.com", "apple.com", "yahoo.com", "bing.com"
     }
     BLOCKED_DOMAINS.update(common_domains)
-    print("[!] 🔒 אינטרנט חסום - ילד לא רשום!")
+    print("[!]  אינטרנט חסום - ילד לא רשום!")
 
 
 def extract_main_site_name(domain):
@@ -370,6 +369,7 @@ def add_to_history(domain, timestamp, was_blocked=False):
 
         print(f"[HISTORY] ✅ נוסף: {display_name} ({main_domain}) ({'חסום' if was_blocked else 'מותר'})")
 
+
 def send_history_update():
     print(f"[DEBUG] 🔍 send_history_update נקראה!")
     print(f"[DEBUG] יש child_client? {hasattr(child_client, 'connected')}")
@@ -380,24 +380,22 @@ def send_history_update():
 
     if hasattr(child_client, 'connected') and child_client.connected and browsing_history:
         try:
-            print(f"[DEBUG] ✅ תנאים מתקיימים - שולח היסטוריה...")
+            print(f"[DEBUG]  תנאים מתקיימים - שולח היסטוריה...")
             with history_lock:
                 recent_history = browsing_history.copy()
             data = {"child_name": CHILD_NAME, "history": recent_history}
             print(f"[DEBUG] נתונים לשליחה: {len(recent_history)} רשומות")
 
             Protocol.send_message(child_client.sock, Protocol.BROWSING_HISTORY, data)
-            print(f"[HISTORY] ✅ נשלח עדכון לשרת: {len(recent_history)} רשומות")
+            print(f"[HISTORY]  נשלח עדכון לשרת: {len(recent_history)} רשומות")
         except Exception as e:
-            print(f"[!] ❌ שגיאה בשליחת היסטוריה: {e}")
+            print(f"[!]  שגיאה בשליחת היסטוריה: {e}")
             import traceback
             traceback.print_exc()
     else:
-        print(f"[DEBUG] ❌ תנאים לא מתקיימים:")
+        print(f"[DEBUG]  תנאים לא מתקיימים:")
         print(f"[DEBUG] - connected: {hasattr(child_client, 'connected') and child_client.connected}")
         print(f"[DEBUG] - history: {len(browsing_history)} רשומות")
-
-
 
 
 class BlockHandler(http.server.BaseHTTPRequestHandler):
@@ -446,7 +444,8 @@ class BlockHandler(http.server.BaseHTTPRequestHandler):
                 print(f"[*] בקשת רישום מהדפדפן: '{child_name}'")
 
                 if not child_name:
-                    error_html = create_error_page("שגיאה", "השם לא יכול להיות ריק!", back_button=True, retry_button=True)
+                    error_html = create_error_page("שגיאה", "השם לא יכול להיות ריק!", back_button=True,
+                                                   retry_button=True)
                     self.send_response(200)
                     self.send_header('Content-type', 'text/html; charset=utf-8')
                     self.end_headers()
@@ -454,7 +453,8 @@ class BlockHandler(http.server.BaseHTTPRequestHandler):
                     return
 
                 if len(child_name) < 2:
-                    error_html = create_error_page("שגיאה", "השם חייב להכיל לפחות 2 תווים!", back_button=True, retry_button=True)
+                    error_html = create_error_page("שגיאה", "השם חייב להכיל לפחות 2 תווים!", back_button=True,
+                                                   retry_button=True)
                     self.send_response(200)
                     self.send_header('Content-type', 'text/html; charset=utf-8')
                     self.end_headers()
@@ -474,7 +474,7 @@ class BlockHandler(http.server.BaseHTTPRequestHandler):
                     # דף הצלחה מעוצב
                     success_html = create_success_page(
                         f"ברוך הבא {child_name}!",
-                        "✅ נרשמת בהצלחה במערכת בקרת ההורים<br>🌐 כעת תוכל לגלוש באינטרנט בבטחה"
+                        " נרשמת בהצלחה במערכת בקרת ההורים<br> כעת תוכל לגלוש באינטרנט בבטחה"
                     )
 
                     self.send_response(200)
@@ -482,7 +482,7 @@ class BlockHandler(http.server.BaseHTTPRequestHandler):
                     self.end_headers()
                     self.wfile.write(success_html.encode('utf-8'))
 
-                    print(f"[+] ✅ ילד נרשם בהצלחה דרך הדפדפן: {child_name}")
+                    print(f"[+]  ילד נרשם בהצלחה דרך הדפדפן: {child_name}")
                     return
 
                 else:
@@ -516,6 +516,7 @@ class BlockHandler(http.server.BaseHTTPRequestHandler):
     def log_message(self, format, *args):
         # השתק הודעות לוג של HTTP
         return
+
 
 def clear_dns_cache():
     print("[*] מנקה DNS cache...")
@@ -715,64 +716,64 @@ def graceful_shutdown():
 
 class ChildClient:
     def __init__(self):
-            self.sock = None
-            self.child_name = CHILD_NAME
-            self.connected = False
-            self.keep_running = True
-            self.connection_event = threading.Event()
+        self.sock = None
+        self.child_name = CHILD_NAME
+        self.connected = False
+        self.keep_running = True
+        self.connection_event = threading.Event()
 
     def connect_to_parent(self):
-            # אם כבר יש חיבור מהאימות, לא צריך ליצור חדש
-            if self.sock and self.connected:
-                print("[DEBUG] כבר מחובר מאימות קודם")
-                return
+        # אם כבר יש חיבור מהאימות, לא צריך ליצור חדש
+        if self.sock and self.connected:
+            print("[DEBUG] כבר מחובר מאימות קודם")
+            return
 
-            retry_count = 0
-            max_retries = 5
+        retry_count = 0
+        max_retries = 5
 
-            while self.keep_running and retry_count < max_retries:
+        while self.keep_running and retry_count < max_retries:
+            try:
+                print(f"[*] מנסה להתחבר לשרת הורים (ניסיון {retry_count + 1}/{max_retries})...")
+                self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                self.sock.settimeout(3)
+                self.sock.connect((PARENT_SERVER_IP, COMMUNICATION_PORT))
+
+                register_data = {"name": self.child_name}
+                Protocol.send_message(self.sock, Protocol.REGISTER_CHILD, register_data)
+
+                self.sock.settimeout(5)
+                msg_type, _ = Protocol.receive_message(self.sock)
+
+                if msg_type == Protocol.ACK:
+                    self.connected = True
+                    self.connection_event.set()
+                    print(f"[+] מחובר לשרת הורים כ-{self.child_name}")
+                    self.request_domains_update()
+                    time.sleep(1)
+                    self.listen_for_updates()
+                    return
+
+            except socket.timeout:
+                print(f"[!] timeout בחיבור לשרת הורים")
+                retry_count += 1
+            except Exception as e:
+                print(f"[!] שגיאת חיבור: {e}")
+                retry_count += 1
+
+            self.connected = False
+            if self.sock:
                 try:
-                    print(f"[*] מנסה להתחבר לשרת הורים (ניסיון {retry_count + 1}/{max_retries})...")
-                    self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                    self.sock.settimeout(3)
-                    self.sock.connect((PARENT_SERVER_IP, COMMUNICATION_PORT))
+                    self.sock.close()
+                except:
+                    pass
 
-                    register_data = {"name": self.child_name}
-                    Protocol.send_message(self.sock, Protocol.REGISTER_CHILD, register_data)
+            if retry_count < max_retries:
+                print(f"[*] ממתין {2} שניות לפני ניסיון חוזר...")
+                time.sleep(2)
 
-                    self.sock.settimeout(5)
-                    msg_type, _ = Protocol.receive_message(self.sock)
-
-                    if msg_type == Protocol.ACK:
-                        self.connected = True
-                        self.connection_event.set()
-                        print(f"[+] מחובר לשרת הורים כ-{self.child_name}")
-                        self.request_domains_update()
-                        time.sleep(1)
-                        self.listen_for_updates()
-                        return
-
-                except socket.timeout:
-                    print(f"[!] timeout בחיבור לשרת הורים")
-                    retry_count += 1
-                except Exception as e:
-                    print(f"[!] שגיאת חיבור: {e}")
-                    retry_count += 1
-
-                self.connected = False
-                if self.sock:
-                    try:
-                        self.sock.close()
-                    except:
-                        pass
-
-                if retry_count < max_retries:
-                    print(f"[*] ממתין {2} שניות לפני ניסיון חוזר...")
-                    time.sleep(2)
-
-            print(f"[!] נכשל בחיבור לשרת הורים אחרי {max_retries} ניסיונות")
-            print("[*] ממשיך בפעולה ללא שרת הורים")
-            self.connection_event.set()
+        print(f"[!] נכשל בחיבור לשרת הורים אחרי {max_retries} ניסיונות")
+        print("[*] ממשיך בפעולה ללא שרת הורים")
+        self.connection_event.set()
 
     def wait_for_connection(self, timeout=10):
         print(f"[*] ממתין לחיבור לשרת הורים (עד {timeout} שניות)...")
