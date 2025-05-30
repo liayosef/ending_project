@@ -1,7 +1,7 @@
-import socket
 from scapy.all import *
 from scapy.layers.dns import DNS, DNSQR, DNSRR
 import json
+from contextlib import contextmanager
 import threading
 import time
 from urllib.parse import parse_qs
@@ -16,6 +16,7 @@ import ipaddress
 from protocol import Protocol, COMMUNICATION_PORT
 import http.server
 import socketserver
+import socket
 from datetime import datetime, timedelta
 import sys
 import webbrowser
@@ -53,8 +54,113 @@ OBVIOUS_TECHNICAL_PATTERNS = [
     'cdn', 'cache', 'static', 'assets', 'edge', 'akamai', 'cloudflare',
     'api', 'ws', 'websocket', 'ajax', 'xhr', 'heartbeat', 'status',
     'clarity.ms', 'mktoresp.com', 'optimizely.com', 'googlezip.net',
-    'heyday', 'jquery.com', 'rss.app', 'gostreaming.tv', 'google.com','microsoft.com'
+    'heyday', 'jquery.com', 'rss.app', 'gostreaming.tv', 'google.com', 'microsoft.com'
 ]
+
+
+class NetworkManager:
+    """מחלקה לניהול יעיל של סוקטים - מונעת דליפות"""
+
+    def __init__(self):
+        # סוקט קבוע לשאילתות DNS
+        self._dns_query_socket = None
+        self._dns_socket_lock = threading.Lock()
+
+        # Pool של סוקטים לתקשורת עם שרת הורים
+        self._parent_socket_pool = []
+        self._pool_lock = threading.Lock()
+        self._max_pool_size = 5
+
+        # סוקט קבוע לתקשורת ארוכת טווח
+        self._persistent_parent_socket = None
+        self._persistent_socket_lock = threading.Lock()
+
+    def get_dns_query_socket(self):
+        """מחזיר סוקט UDP לשאילתות DNS - יוצר רק פעם אחת"""
+        with self._dns_socket_lock:
+            if self._dns_query_socket is None:
+                self._dns_query_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                self._dns_query_socket.settimeout(5)
+                print("[NETWORK] יצרתי סוקט DNS קבוע")
+            return self._dns_query_socket
+
+    @contextmanager
+    def get_parent_socket_from_pool(self):
+        """Context manager לסוקט זמני לשרת הורים - גרסה מתוקנת"""
+        sock = None
+        try:
+            # תמיד יוצר סוקט חדש - פשוט יותר ובטוח יותר
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.settimeout(10)
+            print("[NETWORK] ✅ יצרתי סוקט חדש (לא pool)")
+
+            yield sock
+
+        except Exception as e:
+            print(f"[NETWORK] ❌ שגיאה בסוקט: {e}")
+            raise
+        finally:
+            # תמיד סוגר את הסוקט - אין pool!
+            if sock:
+                try:
+                    sock.close()
+                    print("[NETWORK] 🗑️ סוקט נסגר")
+                except:
+                    pass
+
+    def get_persistent_parent_socket(self):
+        """סוקט קבוע לתקשורת ארוכת טווח עם שרת הורים"""
+        with self._persistent_socket_lock:
+            if self._persistent_parent_socket is None:
+                self._persistent_parent_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                print("[NETWORK] יצרתי סוקט קבוע לשרת הורים")
+            return self._persistent_parent_socket
+
+    def close_persistent_socket(self):
+        """סגירת הסוקט הקבוע"""
+        with self._persistent_socket_lock:
+            if self._persistent_parent_socket:
+                try:
+                    self._persistent_parent_socket.shutdown(socket.SHUT_RDWR)
+                    self._persistent_parent_socket.close()
+                    print("[NETWORK] ✅ סגרתי סוקט קבוע")
+                except:
+                    pass
+                self._persistent_parent_socket = None
+
+    def cleanup_all(self):
+        """ניקוי כל הסוקטים - לקריאה בסוף התוכנית"""
+        print("[NETWORK] 🧹 מנקה את כל הסוקטים...")
+
+        # סגירת סוקט DNS
+        with self._dns_socket_lock:
+            if self._dns_query_socket:
+                try:
+                    self._dns_query_socket.close()
+                    print("[NETWORK] ✅ סוקט DNS נסגר")
+                except:
+                    pass
+                self._dns_query_socket = None
+
+        # סגירת pool
+        with self._pool_lock:
+            for sock in self._parent_socket_pool:
+                try:
+                    sock.close()
+                except:
+                    pass
+            cleared_count = len(self._parent_socket_pool)
+            self._parent_socket_pool.clear()
+            print(f"[NETWORK] ✅ Pool נוקה ({cleared_count} סוקטים)")
+
+        # סגירת סוקט קבוע
+        self.close_persistent_socket()
+
+        print("[NETWORK] 🎉 כל הסוקטים נוקו!")
+
+
+# אובייקט גלובלי
+network_manager = NetworkManager()
 
 
 def load_registration():
@@ -104,28 +210,24 @@ def check_child_registration():
 
 
 def verify_child_with_parent(child_name):
+    """גרסה משופרת שמשתמשת ב-NetworkManager"""
     try:
         print(f"[DEBUG] מנסה לאמת ילד: {child_name}")
-        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        sock.settimeout(10)
-        sock.connect((PARENT_SERVER_IP, COMMUNICATION_PORT))
 
-        verify_data = {"child_name": child_name}
-        Protocol.send_message(sock, Protocol.VERIFY_CHILD, verify_data)
+        with network_manager.get_parent_socket_from_pool() as sock:
+            sock.connect((PARENT_SERVER_IP, COMMUNICATION_PORT))
 
-        msg_type, data = Protocol.receive_message(sock)
-        is_valid = data.get("is_valid", False)
+            verify_data = {"child_name": child_name}
+            Protocol.send_message(sock, Protocol.VERIFY_CHILD, verify_data)
 
-        sock.close()
-        print(f"[DEBUG]  סגרתי חיבור אימות")
-        return is_valid
+            msg_type, data = Protocol.receive_message(sock)
+            is_valid = data.get("is_valid", False)
+
+            print(f"[DEBUG]  אימות הושלם")
+            return is_valid
 
     except Exception as e:
         print(f"[!] שגיאה באימות: {e}")
-        try:
-            sock.close()
-        except:
-            pass
         return False
 
 
@@ -187,13 +289,8 @@ def periodic_registration_check():
         try:
             time.sleep(REGISTRATION_CHECK_INTERVAL)
             if CHILD_NAME:
-                if not verify_child_with_parent(CHILD_NAME):
-                    print(f"[!]  הילד '{CHILD_NAME}' לא רשום יותר במערכת!")
-                    print("[!]  חוזר למצב חסימה מלאה...")
-                    try:
-                        os.remove(REGISTRATION_FILE)
-                    except:
-                        pass
+                if not child_client.connected:
+                    print(f"[!] הילד '{CHILD_NAME}' לא מחובר יותר!")
                     CHILD_NAME = None
                     block_all_internet()
         except Exception as e:
@@ -317,7 +414,7 @@ def is_obviously_technical(domain):
         'api', 'ws', 'websocket', 'ajax', 'xhr', 'heartbeat', 'status',
         'telemetry', 'metrics', 'logs', 'monitoring', 'beacon',
         'googlesyndication', 'googleadservices', 'facebook.com/tr',
-        'connect.facebook.net', 'platform.twitter.com'
+        'connect.facebook.net', 'platform.twitter.com', 'google.com',
     ]
 
     for pattern in technical_patterns:
@@ -371,8 +468,6 @@ def add_to_history(domain, timestamp, was_blocked=False):
 
 
 def send_history_update():
-    print(f"[DEBUG] 🔍 send_history_update נקראה!")
-    print(f"[DEBUG] יש child_client? {hasattr(child_client, 'connected')}")
     if hasattr(child_client, 'connected'):
         print(f"[DEBUG] child_client.connected = {child_client.connected}")
     print(f"[DEBUG] browsing_history length = {len(browsing_history)}")
@@ -705,6 +800,9 @@ class DNSManager:
 def graceful_shutdown():
     print("\n🔄 מתחיל סגירה נקייה...")
     try:
+        print("[*] סוגר חיבורי רשת...")
+        network_manager.cleanup_all()
+
         print("[*] משחזר הגדרות DNS מקוריות...")
         if dns_manager.restore_original_dns():
             print("[+] ✅ DNS שוחזר בהצלחה")
@@ -716,33 +814,33 @@ def graceful_shutdown():
 
 class ChildClient:
     def __init__(self):
-        self.sock = None
         self.child_name = CHILD_NAME
         self.connected = False
         self.keep_running = True
         self.connection_event = threading.Event()
+        self._main_socket = None
+
+    @property
+    def sock(self):
+        return self._main_socket
 
     def connect_to_parent(self):
-        # אם כבר יש חיבור מהאימות, לא צריך ליצור חדש
-        if self.sock and self.connected:
-            print("[DEBUG] כבר מחובר מאימות קודם")
-            return
-
         retry_count = 0
         max_retries = 5
 
         while self.keep_running and retry_count < max_retries:
             try:
                 print(f"[*] מנסה להתחבר לשרת הורים (ניסיון {retry_count + 1}/{max_retries})...")
-                self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                self.sock.settimeout(3)
-                self.sock.connect((PARENT_SERVER_IP, COMMUNICATION_PORT))
+
+                self._main_socket = network_manager.get_persistent_parent_socket()
+                self._main_socket.settimeout(3)
+                self._main_socket.connect((PARENT_SERVER_IP, COMMUNICATION_PORT))
 
                 register_data = {"name": self.child_name}
-                Protocol.send_message(self.sock, Protocol.REGISTER_CHILD, register_data)
+                Protocol.send_message(self._main_socket, Protocol.REGISTER_CHILD, register_data)
 
-                self.sock.settimeout(5)
-                msg_type, _ = Protocol.receive_message(self.sock)
+                self._main_socket.settimeout(5)
+                msg_type, _ = Protocol.receive_message(self._main_socket)
 
                 if msg_type == Protocol.ACK:
                     self.connected = True
@@ -761,19 +859,23 @@ class ChildClient:
                 retry_count += 1
 
             self.connected = False
-            if self.sock:
-                try:
-                    self.sock.close()
-                except:
-                    pass
+            network_manager.close_persistent_socket()
 
             if retry_count < max_retries:
                 print(f"[*] ממתין {2} שניות לפני ניסיון חוזר...")
                 time.sleep(2)
 
         print(f"[!] נכשל בחיבור לשרת הורים אחרי {max_retries} ניסיונות")
-        print("[*] ממשיך בפעולה ללא שרת הורים")
         self.connection_event.set()
+
+    def request_domains_update(self):
+        if self.connected and self._main_socket:
+            try:
+                Protocol.send_message(self._main_socket, Protocol.GET_DOMAINS)
+                print("[*] בקשה לעדכון דומיינים נשלחה")
+            except Exception as e:
+                print(f"[!] שגיאה בבקשת עדכון דומיינים: {e}")
+                self.connected = False
 
     def wait_for_connection(self, timeout=10):
         print(f"[*] ממתין לחיבור לשרת הורים (עד {timeout} שניות)...")
@@ -788,38 +890,31 @@ class ChildClient:
             print("[!] timeout בחיבור לשרת הורים")
             return False
 
-    def request_domains_update(self):
-        if self.connected:
-            try:
-                Protocol.send_message(self.sock, Protocol.GET_DOMAINS)
-                print("[*] בקשה לעדכון דומיינים נשלחה")
-            except Exception as e:
-                print(f"[!] שגיאה בבקשת עדכון דומיינים: {e}")
-                self.connected = False
+    def send_status_update(self):
+        while self.keep_running:
+            if self.connected and self._main_socket:
+                try:
+                    Protocol.send_message(self._main_socket, Protocol.CHILD_STATUS)
+                    send_history_update()
+                except:
+                    self.connected = False
+            time.sleep(3)
 
     def listen_for_updates(self):
         print(f"[*] מתחיל להאזין לעדכונים מהשרת...")
         while self.connected and self.keep_running:
             try:
-                self.sock.settimeout(30)
-                msg_type, data = Protocol.receive_message(self.sock)
+                self._main_socket.settimeout(30)
+                msg_type, data = Protocol.receive_message(self._main_socket)
 
                 if msg_type == Protocol.UPDATE_DOMAINS:
                     domains = data.get('domains', [])
                     global BLOCKED_DOMAINS
-                    old_domains = BLOCKED_DOMAINS.copy()
                     BLOCKED_DOMAINS = set(domains)
-
                     print(f"[+] עודכנו דומיינים חסומים: {len(BLOCKED_DOMAINS)} דומיינים")
-                    if len(BLOCKED_DOMAINS) <= 10:
-                        print(f"[DEBUG] דומיינים: {list(BLOCKED_DOMAINS)}")
-
-                    if old_domains != BLOCKED_DOMAINS:
-                        print("[*] מנקה DNS cache...")
-                        clear_dns_cache()
 
                 elif msg_type == Protocol.CHILD_STATUS:
-                    Protocol.send_message(self.sock, Protocol.ACK)
+                    Protocol.send_message(self._main_socket, Protocol.ACK)
 
                 elif msg_type == Protocol.GET_HISTORY:
                     send_history_update()
@@ -837,16 +932,6 @@ class ChildClient:
                 break
 
         print("[*] הפסקת האזנה לשרת הורים")
-
-    def send_status_update(self):
-        while self.keep_running:
-            if self.connected:
-                try:
-                    Protocol.send_message(self.sock, Protocol.CHILD_STATUS)
-                    send_history_update()
-                except:
-                    self.connected = False
-            time.sleep(3)
 
 
 child_client = ChildClient()
@@ -911,31 +996,25 @@ def handle_dns_request(data, addr, sock):
                 an=DNSRR(rrname=packet_response.qd.qname, ttl=0, rdata=BLOCK_PAGE_IP)
             )
             sock.sendto(bytes(response), addr)
-            print(f"[+] נשלחה תשובה לחסימת {query_name} ל-{addr[0]}")
 
         else:
             print(f"[+] מעביר את הבקשה ל-DNS האמיתי ({REAL_DNS_SERVER})")
             add_to_history(query_name, current_time, was_blocked=False)
 
             try:
-                proxy_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-                proxy_sock.settimeout(5)
-                proxy_sock.sendto(data, (REAL_DNS_SERVER, 53))
-                response_data, _ = proxy_sock.recvfrom(4096)
-                proxy_sock.close()
+                dns_sock = network_manager.get_dns_query_socket()
+                dns_sock.sendto(data, (REAL_DNS_SERVER, 53))
+                response_data, _ = dns_sock.recvfrom(4096)
 
                 try:
                     response_dns = DNS(response_data)
                     for answer in response_dns.an:
                         answer.ttl = 0
                     sock.sendto(bytes(response_dns), addr)
-                    print(f"[+] התקבלה והועברה תשובת DNS עבור {query_name} ל-{addr[0]}")
                 except:
                     sock.sendto(response_data, addr)
-                    print(f"[+] התקבלה והועברה תשובת DNS עבור {query_name} ל-{addr[0]}")
 
             except socket.timeout:
-                print(f"[!] תם הזמן בהמתנה לתשובה מ-DNS האמיתי")
                 error_response = DNS(id=packet_response.id, qr=1, aa=1, rcode=2, qd=packet_response.qd)
                 sock.sendto(bytes(error_response), addr)
             except Exception as e:
@@ -996,7 +1075,6 @@ def display_startup_messages():
 if __name__ == "__main__":
     try:
         print("\n מתחיל מערכת בקרת הורים...")
-
         print("[*] בודק רישום קיים...")
         if check_child_registration():
             print(f"[+]  נמצא רישום: {CHILD_NAME}")
@@ -1082,3 +1160,5 @@ if __name__ == "__main__":
         print(f"\n[!] ❌ שגיאה קריטית: {e}")
         graceful_shutdown()
         sys.exit(1)
+    finally:
+        network_manager.cleanup_all()

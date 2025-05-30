@@ -19,7 +19,7 @@ from cryptography.hazmat.primitives.asymmetric import rsa
 import datetime
 import socket
 from html_templates_parent import (REGISTER_TEMPLATE, LOGIN_TEMPLATE, DASHBOARD_TEMPLATE,
-                                   BROWSING_HISTORY_TEMPLATE, MANAGE_CHILDREN_TEMPLATE,)
+                                   BROWSING_HISTORY_TEMPLATE, MANAGE_CHILDREN_TEMPLATE, )
 
 HTTP_PORT = 8000
 HTTPS_PORT = 8443
@@ -214,8 +214,8 @@ def load_browsing_history():
                     if entries:
                         print(f"[DEBUG LOAD] דוגמה אחרונה: {entries[-1]}")
         except FileNotFoundError:
-           browsing_history = {}
-           print("[*] נוצר קובץ היסטוריה חדש")
+            browsing_history = {}
+            print("[*] נוצר קובץ היסטוריה חדש")
     except Exception as e:
         print(f"[!] שגיאה בטעינת היסטוריה: {e}")
         browsing_history = {}
@@ -246,14 +246,36 @@ def add_to_browsing_history(child_name, entries):
         print(f"[HISTORY] נוספו {len(entries)} רשומות עבור {child_name}")
 
 
-
 class ParentServer:
     def __init__(self):
         self.running = True
         self.server_socket = None
         self.connection_threads = []
+        self.threads_lock = threading.Lock()
         self.load_children_data()
         load_browsing_history()
+
+        self.cleanup_thread = threading.Thread(target=self._cleanup_dead_threads, daemon=True)
+        self.cleanup_thread.start()
+
+    def _cleanup_dead_threads(self):
+        """ניקוי threads שמתו כל 30 שניות"""
+        while self.running:
+            try:
+                time.sleep(30)  # בדיקה כל 30 שניות
+
+                with self.threads_lock:
+                    # סינון threads חיים בלבד
+                    alive_threads = [t for t in self.connection_threads if t.is_alive()]
+                    removed_count = len(self.connection_threads) - len(alive_threads)
+
+                    if removed_count > 0:
+                        self.connection_threads = alive_threads
+                        print(f"[CLEANUP] 🧹 נוקו {removed_count} threads מתים")
+                        print(f"[CLEANUP] נשארו {len(self.connection_threads)} threads פעילים")
+
+            except Exception as e:
+                print(f"[!] שגיאה בניקוי threads: {e}")
 
     def load_children_data(self):
         try:
@@ -408,7 +430,6 @@ class ParentServer:
                 Protocol.send_message(client_socket, Protocol.VERIFY_RESPONSE, {"is_valid": is_valid})
                 print(f"[VERIFY] תגובה ל-'{requested_child}': {'✅ תקף' if is_valid else '❌ לא תקף'}")
 
-
                 if is_valid:
 
                     with data_lock:
@@ -484,6 +505,7 @@ class ParentServer:
     def start_communication_server(self):
         def run_server():
             self.server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            self.server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             self.server_socket.bind(('', COMMUNICATION_PORT))
             self.server_socket.listen(5)
             print(f"[*] שרת תקשורת מאזין על פורט {COMMUNICATION_PORT}")
@@ -491,25 +513,75 @@ class ParentServer:
             while self.running:
                 try:
                     client_socket, address = self.server_socket.accept()
+                    with self.threads_lock:
+                        if len(self.connection_threads) >= 50:  # מקסימום 50 חיבורים
+                            print(f"[!] יותר מדי חיבורים ({len(self.connection_threads)}) - דוחה חיבור")
+                            client_socket.close()
+                            continue
+
                     client_thread = threading.Thread(
                         target=self.handle_child_connection,
-                        args=(client_socket, address)
+                        args=(client_socket, address),
+                        name=f"Child-{address[0]}-{address[1]}"  # 🆕 שם מזהה
                     )
                     client_thread.daemon = True
                     client_thread.start()
-                    self.connection_threads.append(client_thread)
+                    with self.threads_lock:
+                        self.connection_threads.append(client_thread)
+                        print(f"[*] חיבור חדש: {len(self.connection_threads)} חיבורים פעילים")
+
                 except Exception as e:
                     if self.running:
                         print(f"[!] שגיאה בקבלת חיבור: {e}")
 
-        comm_thread = threading.Thread(target=run_server)
+        comm_thread = threading.Thread(target=run_server, name="CommunicationServer")
         comm_thread.daemon = True
         comm_thread.start()
 
     def shutdown(self):
+        print("[*] מתחיל סגירה נקייה של שרת ההורים...")
+
         self.running = False
+
         if self.server_socket:
-            self.server_socket.close()
+            try:
+                self.server_socket.close()
+                print("[*]  שרת תקשורת נסגר")
+            except:
+                pass
+
+        with self.threads_lock:
+            print(f"[*] סוגר {len(self.connection_threads)} חיבורי ילדים...")
+            for thread in self.connection_threads:
+                if thread.is_alive():
+                    try:
+                        # אין דרך ישירה לעצור thread, אבל נסגור את הסוקטים
+                        pass
+                    except:
+                        pass
+
+        # סגירת כל סוקטי הילדים הפעילים
+        disconnected = 0
+        for child_name, conn_info in list(active_connections.items()):
+            try:
+                if conn_info and conn_info.get("socket"):
+                    conn_info["socket"].close()
+                    disconnected += 1
+            except:
+                pass
+
+        active_connections.clear()
+        print(f"[*] ניתקתי {disconnected} ילדים")
+
+        # שמירה אחרונה של נתונים
+        try:
+            self.save_children_data()
+            save_browsing_history()
+            print("[*] ✅ נתונים נשמרו")
+        except Exception as e:
+            print(f"[!] שגיאה בשמירת נתונים: {e}")
+
+        print("[*] 🎉 סגירת שרת ההורים הושלמה")
 
 
 print("[*] ParentServer אותחל עם פונקציות ניהול ילדים והיסטוריית גלישה")
@@ -1052,30 +1124,30 @@ class ParentHandler(http.server.SimpleHTTPRequestHandler):
                 self.end_headers()
                 self.wfile.write(b'<h1>Server Error</h1>')
         elif self.path == '/clear_history':
-                # בדיקה אם המשתמש מחובר
-                logged_in_user = self.is_logged_in()
-                if not logged_in_user:
-                    self.send_response(302)
-                    self.send_header('Location', '/login')
-                    self.end_headers()
-                    return
-
-                child_name = post_params.get('child', [''])[0].strip()
-                print(f"[DEBUG] בקשה למחיקת היסטוריה עבור: '{child_name}'")
-
-                if child_name:
-                    with history_lock:
-                        if child_name in browsing_history:
-                            del browsing_history[child_name]
-                            save_browsing_history()
-                            print(f"[+] ✅ היסטוריה של '{child_name}' נמחקה בהצלחה")
-                        else:
-                            print(f"[!] ⚠️ לא נמצאה היסטוריה עבור '{child_name}'")
-
-                # חזרה לדף היסטוריה
+            # בדיקה אם המשתמש מחובר
+            logged_in_user = self.is_logged_in()
+            if not logged_in_user:
                 self.send_response(302)
-                self.send_header('Location', '/browsing_history')
+                self.send_header('Location', '/login')
                 self.end_headers()
+                return
+
+            child_name = post_params.get('child', [''])[0].strip()
+            print(f"[DEBUG] בקשה למחיקת היסטוריה עבור: '{child_name}'")
+
+            if child_name:
+                with history_lock:
+                    if child_name in browsing_history:
+                        del browsing_history[child_name]
+                        save_browsing_history()
+                        print(f"[+] ✅ היסטוריה של '{child_name}' נמחקה בהצלחה")
+                    else:
+                        print(f"[!] ⚠️ לא נמצאה היסטוריה עבור '{child_name}'")
+
+            # חזרה לדף היסטוריה
+            self.send_response(302)
+            self.send_header('Location', '/browsing_history')
+            self.end_headers()
         else:
             self.send_response(404)
             self.end_headers()
@@ -1132,6 +1204,7 @@ if __name__ == "__main__":
         parent_server.shutdown()
     except Exception as e:
         print(f"[!] ❌ שגיאה בהפעלת HTTPS: {e}")
+        parent_server.shutdown()
         print("[*] 🔄 עובר למצב HTTP כגיבוי...")
 
         # גיבוי HTTP
@@ -1146,3 +1219,9 @@ if __name__ == "__main__":
         except KeyboardInterrupt:
             print("\n[*] עצירת השרת...")
             parent_server.shutdown()
+        finally:
+            # 🆕 הוסף את זה:
+            try:
+                parent_server.shutdown()
+            except:
+                pass
