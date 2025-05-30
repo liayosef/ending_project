@@ -1,13 +1,8 @@
-"""
-מימוש שרת HTTP מותאם אישית למערכת בקרת הורים
-מבוסס על הקוד המקורי של ליה יוסף
-Author: lia yosef
-"""
 import socket
 import threading
 import time
 import os
-from urllib.parse import parse_qs, unquote_plus
+from urllib.parse import parse_qs
 
 # קבועים עבור השרת
 QUEUE_SIZE = 10
@@ -492,8 +487,6 @@ if __name__ == "__main__":
 
     server.set_templates(registration_html, block_html)
 
-
-    # הגדרת פונקציית אימות לדוגמה
     def verify_child_example(name):
         allowed_children = ["ילד 1", "ילד 2", "test"]
         return name in allowed_children

@@ -1,5 +1,4 @@
 import json
-import socket
 import struct
 
 # פורט תקשורת בין הורה לילד

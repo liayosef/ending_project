@@ -6,6 +6,7 @@ import threading
 import time
 import re
 from urllib.parse import urlparse
+import atexit
 import subprocess
 from collections import defaultdict
 import platform
@@ -52,6 +53,20 @@ OBVIOUS_TECHNICAL_PATTERNS = [
     'clarity.ms', 'mktoresp.com', 'optimizely.com', 'googlezip.net',
     'heyday', 'jquery.com', 'rss.app', 'gostreaming.tv', 'google.com', 'microsoft.com'
 ]
+
+
+def emergency_dns_cleanup():
+    print("\n[!] 🚨 ניקוי DNS חירום...")
+    try:
+        # חזרה ל-DHCP
+        subprocess.run(['netsh', 'interface', 'ip', 'set', 'dns', 'Wi-Fi', 'dhcp'],
+                       capture_output=True, timeout=5)
+        print("[!] ✅ DNS הוחזר!")
+    except:
+        pass
+
+
+atexit.register(emergency_dns_cleanup)
 
 
 class NetworkManager:
@@ -503,7 +518,6 @@ def send_history_update():
         print(f"[DEBUG]  תנאים לא מתקיימים:")
         print(f"[DEBUG] - connected: {hasattr(child_client, 'connected') and child_client.connected}")
         print(f"[DEBUG] - history: {len(browsing_history)} רשומות")
-
 
 
 def clear_dns_cache():
@@ -1074,8 +1088,6 @@ if __name__ == "__main__":
             start_dns_proxy()
         except Exception as dns_error:
             print(f"[!] שגיאה ב-DNS Proxy: {dns_error}")
-        # אל תקרוס - תמשיך לגרייספול שאטדאון
-
     except KeyboardInterrupt:
         print("\n🛑 התקבלה בקשת עצירה...")
     except Exception as e:
