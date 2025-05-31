@@ -609,6 +609,7 @@ class ParentHandler(http.server.SimpleHTTPRequestHandler):
             return email
         return None
 
+
     def notify_child_immediate(self, child_name):
         print(f"[DEBUG] מנסה לעדכן {child_name}...")
         with data_lock:
