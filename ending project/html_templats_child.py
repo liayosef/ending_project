@@ -205,9 +205,6 @@ REGISTRATION_HTML_TEMPLATE = '''<!DOCTYPE html>
             <div class="logo-circle">🛡️</div>
             <h1>מערכת בקרת הורים</h1>
             <div class="subtitle">האינטרנט מוגבל עד לרישום במערכת</div>
-
-            MESSAGE_PLACEHOLDER
-
             <form method="post" action="/register">
                 <div class="form-group">
                     <label for="child_name">👶 השם שלך:</label>

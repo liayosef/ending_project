@@ -24,15 +24,18 @@ from html_templats_child import (
     create_success_page
 )
 from custom_http_server import ParentalControlHTTPServer
+
 # 🆕 Import עבור שרת HTTPS
 try:
     from custom_https_server import HTTPSBlockServer
+
     HTTPS_AVAILABLE = True
     print("[*] ✅ מודול HTTPS זמין")
 except ImportError:
     HTTPSBlockServer = None
     HTTPS_AVAILABLE = False
     print("[*] ⚠️ מודול HTTPS לא זמין - רק HTTP")
+
 
 # 🆕 הפונקציה שחסרה
 REGISTRATION_FILE = "child_registration.json"
@@ -50,12 +53,14 @@ custom_http_server = None
 browsing_history = []
 history_lock = threading.Lock()
 MAX_HISTORY_ENTRIES = 1000
+REGISTRATION_PORT = 80      # דף רישום
+BLOCK_PORT = 8080          # דפי חסימה
+HTTPS_BLOCK_PORT = 8443
 
 # מעקב אחר ביקורים בחלון זמן
 domain_visits = defaultdict(list)
 domain_visits_lock = threading.Lock()
 MAIN_SITE_WINDOW_SECONDS = 30
-
 
 OBVIOUS_TECHNICAL_PATTERNS = [
     'analytics', 'tracking', 'ads', 'doubleclick', 'googletagmanager',
@@ -64,6 +69,34 @@ OBVIOUS_TECHNICAL_PATTERNS = [
     'clarity.ms', 'mktoresp.com', 'optimizely.com', 'googlezip.net',
     'heyday', 'jquery.com', 'rss.app', 'gostreaming.tv',
 ]
+
+def graceful_shutdown():
+    print("\n🔄 מתחיל סגירה נקייה...")
+    try:
+        print("[*] סוגר חיבורי רשת...")
+        network_manager.cleanup_all()
+
+        print("[*] משחזר הגדרות DNS מקוריות...")
+        if dns_manager.restore_original_dns():
+            print("[+] ✅ DNS שוחזר בהצלחה")
+        else:
+            print("[!] ❌ כישלון בשחזור DNS")
+    except Exception as e:
+        print(f"[!] שגיאה בסגירה: {e}")
+
+
+def emergency_dns_cleanup():
+    print("\n[!] 🚨 ניקוי DNS חירום...")
+    try:
+        # חזרה ל-DHCP
+        subprocess.run(['netsh', 'interface', 'ip', 'set', 'dns', 'Wi-Fi', 'dhcp'],
+                       capture_output=True, timeout=5)
+        print("[!] ✅ DNS הוחזר!")
+    except:
+        pass
+
+
+atexit.register(emergency_dns_cleanup)
 
 
 def verify_child_with_parent_callback(child_name):
@@ -81,19 +114,6 @@ def verify_child_with_parent_callback(child_name):
     except Exception as e:
         print(f"[!] שגיאה באימות: {e}")
         return False
-
-def emergency_dns_cleanup():
-    print("\n[!] 🚨 ניקוי DNS חירום...")
-    try:
-        # חזרה ל-DHCP
-        subprocess.run(['netsh', 'interface', 'ip', 'set', 'dns', 'Wi-Fi', 'dhcp'],
-                       capture_output=True, timeout=5)
-        print("[!] ✅ DNS הוחזר!")
-    except:
-        pass
-
-
-atexit.register(emergency_dns_cleanup)
 
 
 class NetworkManager:
@@ -273,52 +293,50 @@ def wait_for_registration():
     print("\n🔧 מכין דף רישום...")
     print("⏳ ממתין שהשרת יהיה מוכן...")
 
-    time.sleep(2)
+    time.sleep(3)  # זמן נוסף לשרת HTTPS
 
-    # בדיקת מוכנות השרת
-    max_attempts = 10
+    # בדיקת מוכנות השרתים
+    max_attempts = 15
+    servers_ready = []
+
     for i in range(max_attempts):
+        # בדיקת שרת HTTP על פורט 80
         try:
             test_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             test_sock.settimeout(0.5)
-            result = test_sock.connect_ex(('127.0.0.1', BLOCK_SERVER_PORT))
+            result = test_sock.connect_ex(('127.0.0.1', 80))
             test_sock.close()
-
-            if result == 0:
-                print("[✅] השרת מוכן!")
-                break
+            if result == 0 and "HTTP:80" not in servers_ready:
+                servers_ready.append("HTTP:80")
         except:
             pass
 
-        print(f"[⏳] ממתין לשרת... ({i + 1}/{max_attempts})")
+        if servers_ready:
+            print(f"[✅] שרתים מוכנים: {', '.join(servers_ready)}")
+            break
+
+        print(f"[⏳] ממתין לשרתים... ({i + 1}/{max_attempts})")
         time.sleep(0.5)
 
-    # פתיחת דפדפן עם הפרוטוקול הנכון
+    # פתיחת דפדפן
     try:
-        if BLOCK_SERVER_PORT:
-            # קביעת הפרוטוקול לפי הפורט
-            if BLOCK_SERVER_PORT in [443, 8443]:
-                protocol = "https"
-                print("⚠️  הדפדפן עלול להתריע על תעודה לא מאומתת")
-                print("   לחץ 'Advanced' ואז 'Proceed to localhost'")
+        if servers_ready:
+            if "HTTP:80" in servers_ready:
+                registration_url = "http://127.0.0.1"
             else:
-                protocol = "http"
+                registration_url = "http://127.0.0.1"
+                print("🌐 פותח דפדפן עם HTTP")
 
-            if BLOCK_SERVER_PORT in [80, 443]:
-                registration_url = f"{protocol}://127.0.0.1"
-            else:
-                registration_url = f"{protocol}://127.0.0.1:{BLOCK_SERVER_PORT}"
-
-            print(f"🌐 פותח דפדפן: {registration_url}")
+            print(f"🔗 כתובת: {registration_url}")
             webbrowser.open(registration_url)
             print("📝 הזן את השם שלך בטופס שמופיע בדפדפן")
         else:
-            print("[!] שרת לא הצליח להתחיל")
+            print("[!] אף שרת לא הצליח להתחיל")
             return False
     except Exception as e:
         print(f"[!] שגיאה בפתיחת דפדפן: {e}")
 
-    # שאר הקוד נשאר זהה...
+    # המתנה לרישום
     max_wait = 300
     waited = 0
 
@@ -328,16 +346,9 @@ def wait_for_registration():
 
         if waited % 30 == 0:
             print(f"[*] ממתין לרישום... ({waited}/{max_wait} שניות)")
-            if BLOCK_SERVER_PORT:
-                if BLOCK_SERVER_PORT in [443, 8443]:
-                    protocol = "https"
-                else:
-                    protocol = "http"
-
-                if BLOCK_SERVER_PORT in [80, 443]:
-                    print(f"[*] 🔗 נסה לגשת ל: {protocol}://127.0.0.1")
-                else:
-                    print(f"[*] 🔗 נסה לגשת ל: {protocol}://127.0.0.1:{BLOCK_SERVER_PORT}")
+            if servers_ready:
+                for server in servers_ready:
+                    print(f"[*] 🔗 נסה לגשת ל: http://127.0.0.1")
 
     if CHILD_NAME:
         print(f"\n🎉 רישום הושלם דרך הדפדפן!")
@@ -510,6 +521,9 @@ def add_to_history(domain, timestamp, was_blocked=False):
     if is_obviously_technical(domain):
         return
 
+    if any(word in domain.lower() for word in ['beacon', 'analytics', 'tracking', 'telemetry']):
+        return
+
     # חילוץ שם האתר
     main_domain = extract_main_site_name(domain)
     display_name = get_site_display_name(domain)
@@ -575,66 +589,92 @@ def start_block_server():
 
     print("[*] מפעיל שרת HTTP/HTTPS מותאם אישית...")
 
-    # רשימת פורטים לניסיון - HTTPS קודם (רק אם זמין)
-    ports_to_try = []
-
+    # 🆕 בדיקה מוקדמת של תעודות SSL
     if HTTPS_AVAILABLE:
-        ports_to_try.extend([
-            (443, 'HTTPS'),  # פורט HTTPS סטנדרטי
-            (8443, 'HTTPS'),  # פורט HTTPS חלופי
-        ])
+        print("[*] בודק תעודות SSL...")
+        check_ssl_certificates()
 
-    ports_to_try.extend([
-        (80, 'HTTP'),  # פורט HTTP סטנדרטי
-        (8080, 'HTTP')  # פורט HTTP חלופי
-    ])
+    servers_started = []
 
-    for port, protocol in ports_to_try:
+    # ניסיון הפעלת HTTPS על פורט 443
+    if HTTPS_AVAILABLE and HTTPSBlockServer is not None:
         try:
-            if protocol == 'HTTPS' and HTTPS_AVAILABLE and HTTPSBlockServer is not None:
-                # ניסיון הפעלת שרת HTTPS
-                custom_http_server = HTTPSBlockServer("127.0.0.1", port, port + 1000)
+            print("[*] 🔒 מנסה להפעיל שרת HTTPS על פורט 443...")
 
-            elif protocol == 'HTTP':
-                # שרת HTTP רגיל
-                custom_http_server = ParentalControlHTTPServer("127.0.0.1", port)
-
-            else:
-                continue
+            https_server = HTTPSBlockServer("127.0.0.1", 443, 8080)
 
             # הגדרת התבניות
-            custom_http_server.set_templates(REGISTRATION_HTML_TEMPLATE, BLOCK_HTML_TEMPLATE)
-
-            # הגדרת פונקציית האימות
-            custom_http_server.set_verify_callback(verify_child_with_parent_callback)
-
-            # הגדרת הפונקציות המעוצבות
-            custom_http_server.set_external_functions(create_error_page, create_success_page)
+            https_server.set_templates(REGISTRATION_HTML_TEMPLATE, BLOCK_HTML_TEMPLATE)
+            https_server.set_verify_callback(verify_child_with_parent_callback)
+            https_server.set_external_functions(create_error_page, create_success_page)
 
             # הפעלת השרת בthread נפרד
-            server_thread = threading.Thread(target=custom_http_server.start_server, daemon=True)
-            server_thread.start()
+            https_thread = threading.Thread(target=https_server.start_server, daemon=True)
+            https_thread.start()
 
-            # המתנה להתחלה
-            if protocol == 'HTTPS':
-                time.sleep(2)  # HTTPS צריך יותר זמן
-            else:
-                time.sleep(1)
+            time.sleep(3)  # 🆕 זמן נוסף לשרת HTTPS להתייצב
 
-            BLOCK_SERVER_PORT = port
-            print(f"[+] ✅ שרת {protocol} מותאם אישית פועל על פורט {port}")
-            return port
+            # שמירה של שרת HTTPS כראשי
+            custom_http_server = https_server
+            BLOCK_SERVER_PORT = 443
+            servers_started.append("HTTPS:443")
+            print("[+] ✅ שרת HTTPS פועל על פורט 443")
 
         except Exception as e:
-            print(f"[!] שגיאה בפורט {port} ({protocol}): {e}")
+            print(f"[!] שגיאה בהפעלת HTTPS על פורט 443: {e}")
             if "Permission denied" in str(e) or "WinError 10013" in str(e):
-                print(f"[!] ⚠️ אין הרשאות לפורט {port} - נסה להריץ כמנהל")
-            custom_http_server = None
-            continue
+                print("[!] ⚠️ נדרשות הרשאות מנהל לפורט 443")
+                print("[!] 💡 הרץ את התוכנית כמנהל (Run as Administrator)")
 
-    print("[!] ❌ כישלון בהפעלת כל השרתים")
-    BLOCK_SERVER_PORT = None
-    return None
+    # הפעלת HTTP על פורט 80
+    try:
+        print("[*] 🔓 מנסה להפעיל שרת HTTP על פורט 80...")
+
+        http_server = ParentalControlHTTPServer("127.0.0.1", 80)
+
+        # הגדרת התבניות
+        http_server.set_templates(REGISTRATION_HTML_TEMPLATE, BLOCK_HTML_TEMPLATE)
+        http_server.set_verify_callback(verify_child_with_parent_callback)
+        http_server.set_external_functions(create_error_page, create_success_page)
+
+        # הפעלת השרת בthread נפרד
+        http_thread = threading.Thread(target=http_server.start_server, daemon=True)
+        http_thread.start()
+
+        time.sleep(1)
+
+        # אם HTTPS לא עבד, HTTP יהיה הראשי
+        if not custom_http_server:
+            custom_http_server = http_server
+            BLOCK_SERVER_PORT = 80
+
+        servers_started.append("HTTP:80")
+        print("[+] ✅ שרת HTTP פועל על פורט 80")
+
+    except Exception as e:
+        print(f"[!] שגיאה בהפעלת HTTP על פורט 80: {e}")
+        if "Permission denied" in str(e) or "WinError 10013" in str(e):
+            print("[!] ⚠️ נדרשות הרשאות מנהל לפורט 80")
+
+    # בדיקה שלפחות שרת אחד עובד
+    if servers_started:
+        print(f"[+] 🎉 שרתי חסימה פעילים: {', '.join(servers_started)}")
+
+        # הודעות חשובות למשתמש
+        if "HTTPS:443" in servers_started:
+            print("")
+            print("🎯 אתרי HTTPS חסומים (Instagram, Facebook, וכו') יטופלו על ידי שרת HTTPS")
+            print("🔒 בפעם הראשונה הדפדפן יבקש אישור לתעודה - תאשר!")
+        if "HTTP:80" in servers_started:
+            print("🔓 אתרי HTTP חסומים יטופלו על ידי שרת HTTP רגיל")
+
+        return BLOCK_SERVER_PORT or 80
+    else:
+        print("[!] ❌ כישלון בהפעלת כל השרתים")
+        print("[!] 💡 בדוק שהתוכנית רצה כמנהל (Run as Administrator)")
+        BLOCK_SERVER_PORT = None
+        return None
+
 
 class DNSManager:
     def __init__(self):
@@ -771,21 +811,18 @@ class DNSManager:
                 print(f"[!] שגיאה בשחזור DNS: {e}")
                 return False
         return False
-
-
-def graceful_shutdown():
-    print("\n🔄 מתחיל סגירה נקייה...")
+def clear_dns_cache_when_updated():
+    """ניקוי DNS cache כשהרשימה החסומה משתנה"""
     try:
-        print("[*] סוגר חיבורי רשת...")
-        network_manager.cleanup_all()
-
-        print("[*] משחזר הגדרות DNS מקוריות...")
-        if dns_manager.restore_original_dns():
-            print("[+] ✅ DNS שוחזר בהצלחה")
+        print("[*] 🧹 מנקה DNS cache אחרי עדכון...")
+        result = subprocess.run(['ipconfig', '/flushdns'],
+                               capture_output=True, text=True, encoding='utf-8')
+        if result.returncode == 0:
+            print("[+] ✅ DNS cache נוקה")
         else:
-            print("[!] ❌ כישלון בשחזור DNS")
+            print(f"[!] בעיה בניקוי cache: {result.stderr}")
     except Exception as e:
-        print(f"[!] שגיאה בסגירה: {e}")
+        print(f"[!] שגיאה בניקוי cache: {e}")
 
 
 class ChildClient:
@@ -876,6 +913,19 @@ class ChildClient:
                     self.connected = False
             time.sleep(3)
 
+    def clear_dns_cache_when_updated(self):
+        """ניקוי DNS cache כשהרשימה החסומה משתנה"""
+        try:
+            print("[*] 🧹 מנקה DNS cache אחרי עדכון...")
+            result = subprocess.run(['ipconfig', '/flushdns'],
+                                    capture_output=True, text=True, encoding='utf-8')
+            if result.returncode == 0:
+                print("[+] ✅ DNS cache נוקה")
+            else:
+                print(f"[!] בעיה בניקוי cache: {result.stderr}")
+        except Exception as e:
+            print(f"[!] שגיאה בניקוי cache: {e}")
+
     def listen_for_updates(self):
         print(f"[*] מתחיל להאזין לעדכונים מהשרת...")
         while self.connected and self.keep_running:
@@ -885,9 +935,15 @@ class ChildClient:
 
                 if msg_type == Protocol.UPDATE_DOMAINS:
                     domains = data.get('domains', [])
+                    print(f"[DEBUG] 🔥 התקבל עדכון דומיינים: {domains}")
                     global BLOCKED_DOMAINS
+                    old_domains = BLOCKED_DOMAINS.copy()  # שמירת הרשימה הישנה
                     BLOCKED_DOMAINS = set(domains)
-                    print(f"[+] עודכנו דומיינים חסומים: {len(BLOCKED_DOMAINS)} דומיינים")
+                    print(f"[DEBUG] 🔥 BLOCKED_DOMAINS עכשיו: {BLOCKED_DOMAINS}")
+
+                    # אם יש שינוי ברשימה - נקה cache
+                    if old_domains != BLOCKED_DOMAINS:
+                        clear_dns_cache_when_updated()
 
                 elif msg_type == Protocol.CHILD_STATUS:
                     Protocol.send_message(self._main_socket, Protocol.ACK)
@@ -909,7 +965,6 @@ class ChildClient:
 
         print("[*] הפסקת האזנה לשרת הורים")
 
-
 child_client = ChildClient()
 dns_manager = DNSManager()
 
@@ -920,28 +975,53 @@ def is_blocked_domain(query_name):
         print(f"[BLOCK] ילד לא רשום - חוסם הכל: {query_name}")
         return True
 
-    # אם הילד רשום - רק דומיינים ספציפיים חסומים
+    # ניקוי הדומיין
     original_query = query_name
     query_name = query_name.lower().strip('.')
 
-    print(f"[DEBUG] בודק דומיין: '{original_query}' -> '{query_name}' (ילד רשום: {CHILD_NAME})")
+    print(f"[DEBUG] בודק דומיין: '{original_query}' -> '{query_name}'")
+    print(f"[DEBUG] רשימה חסומה: {BLOCKED_DOMAINS}")
 
-    if query_name in BLOCKED_DOMAINS:
-        print(f"[DEBUG] התאמה ישירה: {query_name}")
-        return True
+    # חילוץ הדומיין הראשי (להשוואה עם zoom.us vs zoom.com)
+    main_domain_parts = query_name.split('.')
 
     for blocked_domain in BLOCKED_DOMAINS:
         blocked_domain = blocked_domain.lower().strip('.')
+        blocked_parts = blocked_domain.split('.')
+
+        print(f"[DEBUG] משווה {query_name} עם {blocked_domain}")
+
+        # 1. התאמה מדויקת
         if query_name == blocked_domain:
-            print(f"[DEBUG] התאמה מדויקת: {query_name} == {blocked_domain}")
+            print(f"[DEBUG] ✅ התאמה מדויקת: {query_name}")
             return True
+
+        # 2. תת-דומיין רגיל (subdomain.domain.com)
         if query_name.endswith('.' + blocked_domain):
-            print(f"[DEBUG] תת-דומיין: {query_name} סיומת של .{blocked_domain}")
+            print(f"[DEBUG] ✅ תת-דומיין: {query_name}")
             return True
 
-    print(f"[DEBUG] {query_name} מותר")
-    return False
+        # 3. טיפול ב-www
+        if query_name == 'www.' + blocked_domain:
+            print(f"[DEBUG] ✅ www של דומיין חסום: {query_name}")
+            return True
 
+        # 4. 🆕 חסימה לפי שם האתר (zoom.com vs zoom.us)
+        if len(blocked_parts) >= 2 and len(main_domain_parts) >= 2:
+            # השוואת החלק הראשי (zoom vs zoom)
+            if (blocked_parts[0] == main_domain_parts[0] and
+                    len(blocked_parts[0]) > 3):  # רק אתרים עם שם ייחודי
+                print(f"[DEBUG] ✅ שם אתר דומה: {main_domain_parts[0]} (על בסיס {blocked_parts[0]})")
+                return True
+
+        # 5. 🆕 דומיינים שקשורים (cdninstagram.com <- instagram.com)
+        blocked_name = blocked_parts[0]  # "instagram"
+        if blocked_name in query_name and len(blocked_name) > 4:
+            print(f"[DEBUG] ✅ דומיין קשור: {query_name} מכיל {blocked_name}")
+            return True
+
+    print(f"[DEBUG] ❌ {query_name} מותר")
+    return False
 
 def handle_dns_request(data, addr, sock):
     try:
@@ -984,8 +1064,9 @@ def handle_dns_request(data, addr, sock):
 
                 try:
                     response_dns = DNS(response_data)
+                    # 🆕 הגדרת TTL נמוך גם לתשובות רגילות!
                     for answer in response_dns.an:
-                        answer.ttl = 0
+                        answer.ttl = 0  # ככה הדפדפן לא יזכור את התשובה
                     sock.sendto(bytes(response_dns), addr)
                 except:
                     sock.sendto(response_data, addr)
@@ -1027,8 +1108,10 @@ def start_dns_proxy():
                 continue
     except KeyboardInterrupt:
         print("\n[*] עצירת השרת על ידי המשתמש.")
+        graceful_shutdown()
     except Exception as e:  # 🆕 תפוס כל שגיאה!
         print(f"\n[!] שגיאה קריטית ב-DNS Proxy: {e}")
+        graceful_shutdown()
     finally:
         sock.close()
         print("[*] משחזר הגדרות DNS מקוריות...")
@@ -1044,12 +1127,54 @@ def display_startup_messages():
     print(f" מצב: {'רשום במערכת' if CHILD_NAME else 'לא רשום - אינטרנט חסום'}")
     print(f" DNS: 127.0.0.1 (מקומי)")
     print(f" שרת הורים: {PARENT_SERVER_IP}:{COMMUNICATION_PORT}")
+
+    print(" שרתי חסימה:")
+    if HTTPS_AVAILABLE:
+        print("   🔒 HTTPS על פורט 443 - אתרים מאובטחים (Instagram, Facebook, וכו')")
+    print("   🔓 HTTP על פורט 80 - אתרים רגילים")
+
     print("=" * 70)
     if CHILD_NAME:
-        print(" המערכת פועלת - אינטרנט זמין עם חסימות")
+        print(" המערכת פועלת - אינטרנט זמין עם חסימות מאובטחות")
+        print(" ✅ אתרי HTTPS חסומים יציגו דף חסימה ללא התרעות אבטחה")
+        print("")
+        print("🔍 איך לטפל ב'חיבור לא פרטי' בפעם הראשונה:")
+        print("   1. דפדפן יציג: 'Your connection is not private'")
+        print("   2. לחץ: 'Advanced' (מתקדם)")
+        print("   3. לחץ: 'Proceed to localhost (unsafe)'")
+        print("   4. זה יקרה רק פעם אחת לכל דפדפן!")
+        print("   ✨ מהפעם הבאה - דפי חסימה יפים ומאובטחים!")
     else:
         print(" נדרש רישום - אינטרנט חסום לחלוטין")
     print("=" * 70)
+
+
+# 🆕 הוספת פונקציה לבדיקת מצב התעודות
+def check_ssl_certificates():
+    """בדיקה שתעודות SSL נוצרו כראוי"""
+    cert_file = "block_server_cert.pem"
+    key_file = "block_server_key.pem"
+
+    if os.path.exists(cert_file) and os.path.exists(key_file):
+        try:
+            # בדיקה בסיסית שהקבצים תקינים
+            with open(cert_file, 'r') as f:
+                cert_content = f.read()
+            with open(key_file, 'r') as f:
+                key_content = f.read()
+
+            if 'BEGIN CERTIFICATE' in cert_content and 'BEGIN PRIVATE KEY' in key_content:
+                print("[SSL] ✅ תעודות SSL תקינות")
+                return True
+            else:
+                print("[SSL] ⚠️ תעודות SSL לא תקינות")
+                return False
+        except Exception as e:
+            print(f"[SSL] ❌ שגיאה בבדיקת תעודות: {e}")
+            return False
+    else:
+        print("[SSL] ⚠️ תעודות SSL לא נמצאו")
+        return False
 
 
 if __name__ == "__main__":
@@ -1082,6 +1207,7 @@ if __name__ == "__main__":
 
             if not wait_for_registration():
                 print("\n❌ יציאה ללא רישום")
+                graceful_shutdown()
                 sys.exit(1)
 
         display_startup_messages()
@@ -1135,10 +1261,13 @@ if __name__ == "__main__":
             start_dns_proxy()
         except Exception as dns_error:
             print(f"[!] שגיאה ב-DNS Proxy: {dns_error}")
+            graceful_shutdown()
     except KeyboardInterrupt:
         print("\n🛑 התקבלה בקשת עצירה...")
+        graceful_shutdown()
     except Exception as e:
         print(f"\n[!] ❌ שגיאה קריטית: {e}")
+        graceful_shutdown()
     finally:
         # 🆕 כעת זה יתבצע תמיד!
         print("[*] 🔄 מתחיל סגירה סופית...")

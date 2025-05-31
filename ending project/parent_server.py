@@ -610,7 +610,11 @@ class ParentHandler(http.server.SimpleHTTPRequestHandler):
         return None
 
     def notify_child_immediate(self, child_name):
-        """עדכון מיידי לילד"""
+        print(f"[DEBUG] מנסה לעדכן {child_name}...")
+        with data_lock:
+            print(f"[DEBUG] active_connections: {list(active_connections.keys())}")
+            if child_name in active_connections:
+                print(f"[DEBUG] {child_name} נמצא ב-active_connections")
         with data_lock:
             if child_name in active_connections:
                 conn_info = active_connections[child_name]
