@@ -11,7 +11,6 @@ import subprocess
 from collections import defaultdict
 import platform
 import os
-
 import ctypes
 from protocol import Protocol, COMMUNICATION_PORT
 import socket

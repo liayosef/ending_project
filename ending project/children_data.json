@@ -1,22 +1,22 @@
 {
   "ילד 1": {
     "blocked_domains": [
-      "youtube.com",
-      "facebook.com"
+      "facebook.com",
+      "youtube.com"
     ],
     "last_seen": null
   },
   "ילד 2": {
     "blocked_domains": [
-      "tiktok.com",
-      "spotify.com"
+      "instagram.com",
+      "tiktok.com"
     ],
-    "last_seen": 1748613182.66995
+    "last_seen": null
   },
   "ילד 3": {
     "blocked_domains": [
-      "tiktok.com"
+      "twitter.com"
     ],
-    "last_seen": 1748711072.5894768
+    "last_seen": null
   }
 }
