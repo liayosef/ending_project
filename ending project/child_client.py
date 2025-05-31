@@ -24,7 +24,17 @@ from html_templats_child import (
     create_success_page
 )
 from custom_http_server import ParentalControlHTTPServer
+# 🆕 Import עבור שרת HTTPS
+try:
+    from custom_https_server import HTTPSBlockServer
+    HTTPS_AVAILABLE = True
+    print("[*] ✅ מודול HTTPS זמין")
+except ImportError:
+    HTTPSBlockServer = None
+    HTTPS_AVAILABLE = False
+    print("[*] ⚠️ מודול HTTPS לא זמין - רק HTTP")
 
+# 🆕 הפונקציה שחסרה
 REGISTRATION_FILE = "child_registration.json"
 REGISTRATION_CHECK_INTERVAL = 30
 CHILD_NAME = None
@@ -51,9 +61,25 @@ OBVIOUS_TECHNICAL_PATTERNS = [
     'cdn', 'cache', 'static', 'assets', 'edge', 'akamai', 'cloudflare',
     'api', 'ws', 'websocket', 'ajax', 'xhr', 'heartbeat', 'status',
     'clarity.ms', 'mktoresp.com', 'optimizely.com', 'googlezip.net',
-    'heyday', 'jquery.com', 'rss.app', 'gostreaming.tv', 'google.com', 'microsoft.com'
+    'heyday', 'jquery.com', 'rss.app', 'gostreaming.tv',
 ]
 
+
+def verify_child_with_parent_callback(child_name):
+    """פונקציית callback לשרת HTTP"""
+    try:
+        success = verify_child_with_parent(child_name)
+        if success:
+            global CHILD_NAME
+            CHILD_NAME = child_name
+            save_registration(child_name)
+            if custom_http_server and hasattr(custom_http_server, 'set_child_data'):
+                custom_http_server.set_child_data(child_name)
+            child_client.child_name = CHILD_NAME
+        return success
+    except Exception as e:
+        print(f"[!] שגיאה באימות: {e}")
+        return False
 
 def emergency_dns_cleanup():
     print("\n[!] 🚨 ניקוי DNS חירום...")
@@ -246,14 +272,12 @@ def wait_for_registration():
     print("\n🔧 מכין דף רישום...")
     print("⏳ ממתין שהשרת יהיה מוכן...")
 
-    # ⚠️ חשוב! תן לשרת זמן להתחיל
-    time.sleep(2)  # במקום 3 שניות
+    time.sleep(2)
 
-    # 🆕 בדוק שהשרת באמת מוכן
+    # בדיקת מוכנות השרת
     max_attempts = 10
     for i in range(max_attempts):
         try:
-            # ניסיון חיבור מהיר לבדיקה
             test_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             test_sock.settimeout(0.5)
             result = test_sock.connect_ex(('127.0.0.1', BLOCK_SERVER_PORT))
@@ -268,13 +292,21 @@ def wait_for_registration():
         print(f"[⏳] ממתין לשרת... ({i + 1}/{max_attempts})")
         time.sleep(0.5)
 
-    # עכשיו פתח את הדפדפן
+    # פתיחת דפדפן עם הפרוטוקול הנכון
     try:
         if BLOCK_SERVER_PORT:
-            if BLOCK_SERVER_PORT == 80:
-                registration_url = "http://127.0.0.1"
+            # קביעת הפרוטוקול לפי הפורט
+            if BLOCK_SERVER_PORT in [443, 8443]:
+                protocol = "https"
+                print("⚠️  הדפדפן עלול להתריע על תעודה לא מאומתת")
+                print("   לחץ 'Advanced' ואז 'Proceed to localhost'")
             else:
-                registration_url = f"http://127.0.0.1:{BLOCK_SERVER_PORT}"
+                protocol = "http"
+
+            if BLOCK_SERVER_PORT in [80, 443]:
+                registration_url = f"{protocol}://127.0.0.1"
+            else:
+                registration_url = f"{protocol}://127.0.0.1:{BLOCK_SERVER_PORT}"
 
             print(f"🌐 פותח דפדפן: {registration_url}")
             webbrowser.open(registration_url)
@@ -285,7 +317,7 @@ def wait_for_registration():
     except Exception as e:
         print(f"[!] שגיאה בפתיחת דפדפן: {e}")
 
-    # שאר הקוד נשאר אותו דבר...
+    # שאר הקוד נשאר זהה...
     max_wait = 300
     waited = 0
 
@@ -296,10 +328,15 @@ def wait_for_registration():
         if waited % 30 == 0:
             print(f"[*] ממתין לרישום... ({waited}/{max_wait} שניות)")
             if BLOCK_SERVER_PORT:
-                if BLOCK_SERVER_PORT == 80:
-                    print(f"[*] 🔗 נסה לגשת ל: http://127.0.0.1")
+                if BLOCK_SERVER_PORT in [443, 8443]:
+                    protocol = "https"
                 else:
-                    print(f"[*] 🔗 נסה לגשת ל: http://127.0.0.1:{BLOCK_SERVER_PORT}")
+                    protocol = "http"
+
+                if BLOCK_SERVER_PORT in [80, 443]:
+                    print(f"[*] 🔗 נסה לגשת ל: {protocol}://127.0.0.1")
+                else:
+                    print(f"[*] 🔗 נסה לגשת ל: {protocol}://127.0.0.1:{BLOCK_SERVER_PORT}")
 
     if CHILD_NAME:
         print(f"\n🎉 רישום הושלם דרך הדפדפן!")
@@ -535,11 +572,34 @@ def clear_dns_cache():
 def start_block_server():
     global BLOCK_SERVER_PORT, custom_http_server
 
-    print("[*] מפעיל שרת HTTP מותאם אישית...")
+    print("[*] מפעיל שרת HTTP/HTTPS מותאם אישית...")
 
-    for port in [80, 8080]:
+    # רשימת פורטים לניסיון - HTTPS קודם (רק אם זמין)
+    ports_to_try = []
+
+    if HTTPS_AVAILABLE:
+        ports_to_try.extend([
+            (443, 'HTTPS'),  # פורט HTTPS סטנדרטי
+            (8443, 'HTTPS'),  # פורט HTTPS חלופי
+        ])
+
+    ports_to_try.extend([
+        (80, 'HTTP'),  # פורט HTTP סטנדרטי
+        (8080, 'HTTP')  # פורט HTTP חלופי
+    ])
+
+    for port, protocol in ports_to_try:
         try:
-            custom_http_server = ParentalControlHTTPServer("127.0.0.1", port)
+            if protocol == 'HTTPS' and HTTPS_AVAILABLE and HTTPSBlockServer is not None:
+                # ניסיון הפעלת שרת HTTPS
+                custom_http_server = HTTPSBlockServer("127.0.0.1", port, port + 1000)
+
+            elif protocol == 'HTTP':
+                # שרת HTTP רגיל
+                custom_http_server = ParentalControlHTTPServer("127.0.0.1", port)
+
+            else:
+                continue
 
             # הגדרת התבניות
             custom_http_server.set_templates(REGISTRATION_HTML_TEMPLATE, BLOCK_HTML_TEMPLATE)
@@ -547,47 +607,33 @@ def start_block_server():
             # הגדרת פונקציית האימות
             custom_http_server.set_verify_callback(verify_child_with_parent_callback)
 
-            # 🎨 הגדרת הפונקציות המעוצבות שלך:
+            # הגדרת הפונקציות המעוצבות
             custom_http_server.set_external_functions(create_error_page, create_success_page)
 
             # הפעלת השרת בthread נפרד
             server_thread = threading.Thread(target=custom_http_server.start_server, daemon=True)
             server_thread.start()
-            time.sleep(0.5)
+
+            # המתנה להתחלה
+            if protocol == 'HTTPS':
+                time.sleep(2)  # HTTPS צריך יותר זמן
+            else:
+                time.sleep(1)
 
             BLOCK_SERVER_PORT = port
-            print(f"[+] שרת HTTP מותאם אישית פועל על פורט {port}")
+            print(f"[+] ✅ שרת {protocol} מותאם אישית פועל על פורט {port}")
             return port
 
         except Exception as e:
-            print(f"[!] שגיאה בפורט {port}: {e}")
+            print(f"[!] שגיאה בפורט {port} ({protocol}): {e}")
+            if "Permission denied" in str(e) or "WinError 10013" in str(e):
+                print(f"[!] ⚠️ אין הרשאות לפורט {port} - נסה להריץ כמנהל")
             custom_http_server = None
             continue
 
-    print("[!] כישלון בהפעלת שרת HTTP")
+    print("[!] ❌ כישלון בהפעלת כל השרתים")
     BLOCK_SERVER_PORT = None
     return None
-
-
-def verify_child_with_parent_callback(child_name):
-    """פונקציית callback לשרת HTTP"""
-    try:
-        success = verify_child_with_parent(child_name)
-        if success:
-            global CHILD_NAME
-            CHILD_NAME = child_name
-            save_registration(child_name)
-
-            if custom_http_server and hasattr(custom_http_server, 'set_child_data'):
-                custom_http_server.set_child_data(child_name)
-
-            child_client.child_name = CHILD_NAME
-
-        return success
-    except Exception as e:
-        print(f"[!] שגיאה באימות callback: {e}")
-        return False
-
 
 class DNSManager:
     def __init__(self):
