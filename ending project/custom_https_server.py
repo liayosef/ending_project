@@ -373,6 +373,7 @@ class HTTPSBlockServer:
 
         return response
 
+
     def create_simple_error_page(self, title, message):
         """יצירת דף שגיאה פשוט אם הפונקציות החיצוניות לא זמינות"""
         return f"""

@@ -21,6 +21,7 @@ import socket
 from html_templates_parent import (REGISTER_TEMPLATE, LOGIN_TEMPLATE, DASHBOARD_TEMPLATE,
                                    BROWSING_HISTORY_TEMPLATE, MANAGE_CHILDREN_TEMPLATE, )
 
+
 HTTP_PORT = 8000
 HTTPS_PORT = 8443
 

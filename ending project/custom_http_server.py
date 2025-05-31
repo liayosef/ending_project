@@ -30,7 +30,6 @@ CONTENT_TYPES = {
 
 class ParentalControlHTTPServer:
     """שרת HTTP מותאם אישית למערכת בקרת הורים"""
-
     def __init__(self, ip="127.0.0.1", port=8080):
         self.ip = ip
         self.port = port

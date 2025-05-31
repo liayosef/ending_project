@@ -56,6 +56,7 @@ domain_visits = defaultdict(list)
 domain_visits_lock = threading.Lock()
 MAIN_SITE_WINDOW_SECONDS = 30
 
+
 OBVIOUS_TECHNICAL_PATTERNS = [
     'analytics', 'tracking', 'ads', 'doubleclick', 'googletagmanager',
     'cdn', 'cache', 'static', 'assets', 'edge', 'akamai', 'cloudflare',
