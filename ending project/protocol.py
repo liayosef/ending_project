@@ -204,7 +204,7 @@ class Protocol:
 
             # Send message length followed by message data
             length = struct.pack('!I', len(message_bytes))
-            sock.sendall(length + message_bytes)
+            sock.sendall(length + message_bytes)# type: ignore
 
             # Log message
             if encrypted:
@@ -235,7 +235,7 @@ class Protocol:
         """
         try:
             # Receive message length
-            length_data = sock.recv(4)
+            length_data = sock.recv(4)  # type: ignore
             if len(length_data) < 4:
                 raise ConnectionError("Connection closed unexpectedly")
 
@@ -244,7 +244,7 @@ class Protocol:
             # Receive message data
             message_bytes = b""
             while len(message_bytes) < length:
-                chunk = sock.recv(length - len(message_bytes))
+                chunk = sock.recv(length - len(message_bytes))# type: ignore
                 if not chunk:
                     raise ConnectionError("Connection closed unexpectedly")
                 message_bytes += chunk

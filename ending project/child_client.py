@@ -25,6 +25,10 @@ from html_templats_child import (
     create_success_page
 )
 from custom_http_server import ParentalControlHTTPServer
+import psutil
+import hashlib
+from child_vpn_dns_protection import ChildVPNDNSProtection
+
 
 # Configure logging
 logging.basicConfig(
@@ -67,7 +71,7 @@ MAX_HISTORY_ENTRIES = 1000
 REGISTRATION_PORT = 80  # Registration page port
 BLOCK_PORT = 8080  # Block pages port
 HTTPS_BLOCK_PORT = 8443
-
+child_security_protection = None
 # Domain visit tracking within time window
 domain_visits = defaultdict(list)
 domain_visits_lock = threading.Lock()
@@ -90,6 +94,7 @@ def graceful_shutdown():
     """
     logger.info("Starting graceful shutdown...")
     try:
+        stop_security_protection()
         logger.info("Closing network connections...")
         network_manager.cleanup_all()
 
@@ -123,15 +128,19 @@ atexit.register(emergency_dns_cleanup)
 def verify_child_with_parent_callback(child_name):
     """
     Callback function for HTTP server to verify child with parent.
-
-    Args:
-        child_name (str): Name of the child to verify
-
-    Returns:
-        bool: True if verification successful, False otherwise
+    Enhanced with security checks.
     """
     try:
-        logger.info(f"Verifying child: {child_name}")
+        logger.info(f" Verifying child with security check: {child_name}")
+
+        if child_security_protection:
+            security_result = child_security_protection.comprehensive_security_check()
+
+            if security_result["overall_risk"] in ["high", "critical"]:
+                logger.critical(f" SECURITY RISK DETECTED during registration!")
+                logger.critical(f"Threats: {security_result['threats_detected']}")
+                return False
+
         success = verify_child_with_parent(child_name)
         if success:
             global CHILD_NAME
@@ -140,11 +149,74 @@ def verify_child_with_parent_callback(child_name):
             if custom_http_server and hasattr(custom_http_server, 'set_child_data'):
                 custom_http_server.set_child_data(child_name)
             child_client.child_name = CHILD_NAME
-            logger.info(f"Child verification successful: {child_name}")
+
+            start_security_protection()
+
+            logger.info(f" Child verification successful: {child_name}")
         return success
     except Exception as e:
         logger.error(f"Error in child verification: {e}")
         return False
+
+
+def start_security_protection():
+    """Start security protection for the child device"""
+    global child_security_protection
+
+    try:
+        if not child_security_protection:
+            logger.info(" Starting child security protection...")
+
+            child_security_protection = ChildVPNDNSProtection(
+                report_callback=report_security_to_parent
+            )
+            child_security_protection.start_monitoring(check_interval=30)
+
+            logger.info(" Child security protection started successfully")
+    except Exception as e:
+        logger.error(f"Failed to start security protection: {e}")
+
+
+def stop_security_protection():
+    """Stop security protection"""
+    global child_security_protection
+
+    if child_security_protection:
+        try:
+            child_security_protection.stop_monitoring()
+            logger.info(" Security protection stopped")
+        except Exception as e:
+            logger.error(f"Error stopping security protection: {e}")
+        finally:
+            child_security_protection = None
+
+
+def report_security_to_parent(alert_type, security_data):
+    """Report security issues to parent server"""
+    try:
+        message_data = {
+            "alert_type": alert_type,
+            "security_data": security_data,
+            "child_name": CHILD_NAME,
+            "timestamp": time.time(),
+            "device_info": {
+                "platform": platform.system(),
+                "hostname": socket.gethostname()
+            }
+        }
+
+        if child_client.connected and child_client._main_socket:
+            Protocol.send_message(
+                child_client._main_socket,
+                "SECURITY_ALERT",
+                message_data
+            )
+            logger.critical(f"Security alert sent to parent: {alert_type}")
+        else:
+            logger.error("No parent connection - security alert not sent")
+
+    except Exception as e:
+        logger.error(f"Failed to report security to parent: {e}")
 
 
 class NetworkManager:
@@ -335,6 +407,20 @@ def check_child_registration():
     saved_name, is_registered = load_registration()
 
     if saved_name and is_registered:
+        logger.info("Running security check before registration verification...")
+        temp_protection = ChildVPNDNSProtection()
+        security_result = temp_protection.comprehensive_security_check()
+
+        if security_result["overall_risk"] in ["high", "critical"]:
+            logger.critical(f" SECURITY RISK detected during startup!")
+            logger.critical(f"Threats: {security_result['threats_detected']}")
+            return False
+
+        if verify_child_with_parent(saved_name):
+            CHILD_NAME = saved_name
+            start_security_protection()
+            logger.info(f" Registered child found: {CHILD_NAME}")
+            return True
         if verify_child_with_parent(saved_name):
             CHILD_NAME = saved_name
             logger.info(f"Registered child found: {CHILD_NAME}")
@@ -1170,6 +1256,25 @@ class ChildClient:
                 elif msg_type == Protocol.GET_HISTORY:
                     send_history_update()
 
+                elif msg_type == "SECURITY_CHECK_REQUEST":
+                    logger.info(" Security check requested by parent")
+                    if child_security_protection:
+                        security_result = child_security_protection.comprehensive_security_check()
+                        Protocol.send_message(self._main_socket, "SECURITY_CHECK_RESPONSE", security_result)
+
+                elif msg_type == "FORCE_SECURITY_ACTION":
+                    # ההורה מבקש פעולת אבטחה מיידית
+                    action = data.get("action")
+                    logger.critical(f" Forced security action: {action}")
+
+                    if child_security_protection:
+                        if action == "kill_vpn":
+                            result = child_security_protection.kill_vpn_processes()
+                            logger.info(f"Forced VPN kill result: {result}")
+                        elif action == "restore_dns":
+                            result = child_security_protection.attempt_dns_restoration()
+                            logger.info(f"Forced DNS restore result: {result}")
+
                 elif msg_type == Protocol.ERROR:
                     logger.error(f"Server error: {data}")
                     self.connected = False
@@ -1204,6 +1309,17 @@ def is_blocked_domain(query_name):
     if not CHILD_NAME:
         logger.debug(f"Child not registered - blocking all: {query_name}")
         return True
+
+    vpn_domains = [
+        'nordvpn.com', 'expressvpn.com', 'surfshark.com', 'cyberghost.com',
+        'protonvpn.com', 'tunnelbear.com', 'hotspotshield.com', 'windscribe.com'
+    ]
+
+    query_lower = query_name.lower()
+    for vpn_domain in vpn_domains:
+        if vpn_domain in query_lower:
+            logger.warning(f" VPN domain blocked: {query_name}")
+            return True
 
     # Clean domain
     original_query = query_name

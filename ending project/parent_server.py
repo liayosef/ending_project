@@ -1,7 +1,10 @@
+import logging
+import sys
 import http.server
 import socketserver
 import json
 import threading
+import socket
 from datetime import timezone
 import ipaddress
 import os
@@ -18,70 +21,118 @@ from cryptography.x509.oid import NameOID
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 import datetime
-import socket
+from abc import ABC, abstractmethod
+from vpn_dns_protection import VPNDNSProtection
+from typing import Dict, List, Optional, Any
 from html_templates_parent import (REGISTER_TEMPLATE, LOGIN_TEMPLATE, DASHBOARD_TEMPLATE,
                                    BROWSING_HISTORY_TEMPLATE, MANAGE_CHILDREN_TEMPLATE, )
 
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler('parental_control_parent.log'),
+        logging.StreamHandler(sys.stdout)
+    ]
+)
+logger = logging.getLogger(__name__)
+
+# Configuration Constants
 HTTP_PORT = 8000
 HTTPS_PORT = 8443
 
-# נתונים עבור ילדים
+# Global data storage
 children_data = {}
 data_lock = threading.Lock()
 active_connections = {}
 
-# היסטוריית גלישה
-browsing_history = {}  # מילון לפי שם ילד
+# Browsing history storage
+browsing_history = {}  # Dictionary by child name
 history_lock = threading.Lock()
 
+# Encryption system components
 encryption_system = None
 file_manager = None
+parent_server = None
+
+class ParentalControlException(Exception):
+    """Base exception for parental control system"""
+    def __init__(self, message: str, error_code: Optional[str] = None):
+        super().__init__(message)
+        self.error_code = error_code
 
 
-# אתחול מיידי של מערכת ההצפנה - מסונכרן עם הפרוטוקול
+class EncryptionError(ParentalControlException):
+    """Encryption related errors"""
+    pass
+
+
+class ConnectionError(ParentalControlException):
+    """Connection related errors"""
+    pass
+
+
+class DataValidationError(ParentalControlException):
+    """Data validation errors"""
+    pass
+
 def ensure_encryption():
-    """וידוא שמערכת ההצפנה פועלת ומסונכרנת"""
+    """
+    Ensure encryption system is operational and synchronized.
+
+    Returns:
+        bool: True if encryption system is ready, False otherwise
+    """
     global encryption_system, file_manager
     if encryption_system is None or file_manager is None:
         try:
             from encryption_module import SimpleEncryption, SafeFileManager
             encryption_system = SimpleEncryption("parent_control_system")
             file_manager = SafeFileManager(encryption_system)
-            print("[🔒] מערכת הצפנה אותחלה")
+            logger.info("Encryption system initialized")
 
-            # סנכרון עם מפתח התקשורת
+            # Synchronize with communication keys
             Protocol.sync_encryption_keys()
 
         except Exception as e:
-            print(f"[❌] שגיאה באתחול הצפנה: {e}")
+            logger.error(f"Error initializing encryption: {e}")
             return False
     return True
 
 
 def initialize_encryption():
-    """יצירת מערכת ההצפנה ומפתחות התקשורת"""
+    """
+    Initialize encryption system and communication keys.
+    Sets up both data encryption and communication encryption.
+    """
     global encryption_system, file_manager
 
-    # הצפנה לקבצי נתונים
+    # Data encryption
     encryption_system = SimpleEncryption("parent_control_system")
     file_manager = SafeFileManager(encryption_system)
-    print("[🔒] מערכת הצפנה לנתונים אותחלה")
+    logger.info("Data encryption system initialized")
 
-    # סנכרון מפתח התקשורת
+    # Communication key synchronization
     if Protocol.sync_encryption_keys():
-        print("[🔒] מפתח תקשורת מסונכרן")
+        logger.info("Communication key synchronized")
     else:
-        print("[⚠️] בעיה בסנכרון מפתח תקשורת")
+        logger.warning("Issue with communication key synchronization")
 
 
 def create_ssl_certificate():
-    """יצירת תעודת SSL לשרת ההורים"""
+    """
+    Create SSL certificate for parent server.
+
+    Returns:
+        bool: True if certificate created successfully, False otherwise
+    """
     if os.path.exists("parent_cert.pem") and os.path.exists("parent_key.pem"):
-        print("[*] תעודת SSL כבר קיימת")
+        logger.info("SSL certificate already exists")
         return True
 
     try:
-        print("[*] יוצר תעודת SSL לשרת ההורים...")
+        logger.info("Creating SSL certificate for parent server...")
 
         private_key = rsa.generate_private_key(
             public_exponent=65537,
@@ -115,7 +166,7 @@ def create_ssl_certificate():
             critical=False,
         ).sign(private_key, hashes.SHA256())
 
-        # שמירה
+        # Save certificate and key
         with open("parent_cert.pem", "wb") as f:
             f.write(cert.public_bytes(serialization.Encoding.PEM))
 
@@ -126,20 +177,25 @@ def create_ssl_certificate():
                 encryption_algorithm=serialization.NoEncryption()
             ))
 
-        print("[+] תעודת SSL נוצרה: parent_cert.pem, parent_key.pem")
+        logger.info("SSL certificate created: parent_cert.pem, parent_key.pem")
         return True
 
     except ImportError:
-        print("[!] ספריית cryptography לא זמינה")
-        print("[!] הרץ: pip install cryptography")
+        logger.error("cryptography library not available")
+        logger.error("Run: pip install cryptography")
         return create_fallback_cert()
     except Exception as e:
-        print(f"[!] שגיאה ביצירת תעודה: {e}")
+        logger.error(f"Error creating certificate: {e}")
         return create_fallback_cert()
 
 
 def create_fallback_cert():
-    """תעודת חירום"""
+    """
+    Create emergency fallback certificate.
+
+    Returns:
+        bool: True if fallback certificate created, False otherwise
+    """
     cert_content = """-----BEGIN CERTIFICATE-----
 MIIDXTCCAkWgAwIBAgIJAKoK/heBjcOuMA0GCSqGSIb3DQEBBQUAMEUxCzAJBgNV
 BAYTAklMMRIwEAYDVQQKDAlQYXJlbnQgQ29udHJvbDESMBAGA1UEAwwJbG9jYWxo
@@ -158,22 +214,26 @@ MIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQDMQiXPRhmA3O2M
             f.write(cert_content)
         with open("parent_key.pem", "w") as f:
             f.write(key_content)
-        print("[+] תעודת SSL בסיסית נוצרה")
+        logger.info("Basic SSL certificate created")
         return True
     except:
         return False
 
 
-# פונקציות עזר גלובליות לניהול נתונים
 def save_children_data():
-    """שמירת נתוני ילדים - פונקציה גלובלית מתוקנת ומוצפנת"""
+    """
+    Save children data - corrected and encrypted global function.
+
+    Returns:
+        bool: True if saved successfully, False otherwise
+    """
     global children_data
 
     if file_manager is None:
         initialize_encryption()
 
     try:
-        # הכנת הנתונים לשמירה
+        # Prepare data for saving
         data_to_save = {}
         for child, info in children_data.items():
             blocked_domains = info["blocked_domains"]
@@ -185,29 +245,31 @@ def save_children_data():
                 "last_seen": info.get("last_seen")
             }
 
-        # שמירה מוצפנת
+        # Encrypted save
         success = file_manager.safe_save_json('children_data.json', data_to_save, encrypted=True)
 
         if success:
-            print(f"[CHILDREN] 🔒 נתוני ילדים נשמרו מוצפנים: {len(data_to_save)} ילדים")
+            logger.info(f"Children data saved encrypted: {len(data_to_save)} children")
             return True
         else:
-            raise Exception("שמירה מוצפנת נכשלה")
+            raise Exception("Encrypted save failed")
 
     except Exception as e:
-        print(f"[CHILDREN] ❌ שגיאה בשמירת נתוני ילדים: {e}")
+        logger.error(f"Error saving children data: {e}")
         return False
 
 
 def load_children_data():
-    """טעינת נתוני ילדים - פונקציה גלובלית מתוקנת ומוצפנת"""
+    """
+    Load children data - corrected and encrypted global function.
+    """
     global children_data
 
     if file_manager is None:
         initialize_encryption()
 
     try:
-        # נסיון טעינה מוצפנת תחילה
+        # Try encrypted load first
         data = file_manager.safe_load_json('children_data.json', encrypted=True)
 
         if data:
@@ -216,9 +278,9 @@ def load_children_data():
                 info.setdefault('client_address', None)
                 info.setdefault('last_seen', None)
             children_data.update(data)
-            print(f"[CHILDREN] ✅ נתוני ילדים נטענו מוצפנים: {len(children_data)} ילדים")
+            logger.info(f"Children data loaded encrypted: {len(children_data)} children")
         else:
-            # אם אין קובץ מוצפן, נסה לטעון רגיל ולהמיר
+            # If no encrypted file, try to load regular and convert
             try:
                 with open('children_data.json', 'r', encoding='utf-8') as f:
                     old_data = json.load(f)
@@ -229,214 +291,308 @@ def load_children_data():
                     info.setdefault('last_seen', None)
                 children_data.update(old_data)
 
-                print("[CHILDREN] 🔄 ממיר נתוני ילדים קיימים להצפנה...")
+                logger.info("Converting existing children data to encryption...")
                 save_children_data()
-                print("[CHILDREN] ✅ נתוני ילדים הומרו להצפנה")
+                logger.info("Children data converted to encryption")
 
             except FileNotFoundError:
-                # נתוני ברירת מחדל
+                # Default data
                 children_data.update({
-                    'ילד 1': {"blocked_domains": {"facebook.com", "youtube.com"},
-                              "client_address": None, "last_seen": None},
-                    'ילד 2': {"blocked_domains": {"instagram.com", "tiktok.com"},
-                              "client_address": None, "last_seen": None},
-                    'ילד 3': {"blocked_domains": {"twitter.com"},
-                              "client_address": None, "last_seen": None}
+                    'Child 1': {"blocked_domains": {"facebook.com", "youtube.com"},
+                                "client_address": None, "last_seen": None},
+                    'Child 2': {"blocked_domains": {"instagram.com", "tiktok.com"},
+                                "client_address": None, "last_seen": None},
+                    'Child 3': {"blocked_domains": {"twitter.com"},
+                                "client_address": None, "last_seen": None}
                 })
                 save_children_data()
-                print(f"[CHILDREN] ✅ נתוני ברירת מחדל נוצרו מוצפנים: {len(children_data)} ילדים")
+                logger.info(f"Default encrypted data created: {len(children_data)} children")
 
     except Exception as e:
-        print(f"[CHILDREN] ❌ שגיאה בטעינת נתוני ילדים: {e}")
-        # נתוני חירום
-        children_data['ילד 1'] = {"blocked_domains": set(), "client_address": None, "last_seen": None}
+        logger.error(f"Error loading children data: {e}")
+        # Emergency data
+        children_data['Child 1'] = {"blocked_domains": set(), "client_address": None, "last_seen": None}
 
 
 def save_browsing_history():
-    """שמירת היסטוריית גלישה - פונקציה גלובלית מתוקנת ומוצפנת"""
+    """
+    Save browsing history - corrected and encrypted global function.
+
+    Returns:
+        bool: True if saved successfully, False otherwise
+    """
     global browsing_history
 
     if file_manager is None:
         initialize_encryption()
 
     try:
-        # שמירה מוצפנת
+        # Encrypted save
         success = file_manager.safe_save_json('browsing_history.json', browsing_history, encrypted=True)
 
         if success:
             total_entries = sum(len(entries) for entries in browsing_history.values())
-            print(f"[HISTORY] 🔒 היסטוריה נשמרה מוצפנת: {total_entries} רשומות סה\"כ")
+            logger.info(f"History saved encrypted: {total_entries} total entries")
             return True
         else:
-            raise Exception("שמירה מוצפנת נכשלה")
+            raise Exception("Encrypted save failed")
 
     except Exception as e:
-        print(f"[HISTORY] ❌ שגיאה בשמירת היסטוריה: {e}")
+        logger.error(f"Error saving history: {e}")
         return False
 
 
 def load_browsing_history():
-    """טעינת היסטוריית גלישה - פונקציה גלובלית מתוקנת ומוצפנת"""
+    """
+    Load browsing history - corrected and encrypted global function.
+    """
     global browsing_history
 
     if file_manager is None:
         initialize_encryption()
 
     try:
-        # נסיון טעינה מוצפנת תחילה
+        # Try encrypted load first
         data = file_manager.safe_load_json('browsing_history.json', encrypted=True)
 
         if data and isinstance(data, dict):
             browsing_history = data
             total_entries = sum(len(entries) for entries in browsing_history.values())
-            print(f"[HISTORY] ✅ היסטוריה נטענה מוצפנת:")
-            print(f"[HISTORY]   📊 {len(browsing_history)} ילדים")
-            print(f"[HISTORY]   📊 {total_entries} רשומות סה\"כ")
+            logger.info(f"History loaded encrypted: {len(browsing_history)} children, {total_entries} total entries")
         else:
-            # אם אין קובץ מוצפן, נסה לטעון רגיל ולהמיר
+            # If no encrypted file, try to load regular and convert
             try:
                 with open('browsing_history.json', 'r', encoding='utf-8') as f:
                     old_data = json.load(f)
 
                 if old_data and isinstance(old_data, dict):
                     browsing_history = old_data
-                    print("[HISTORY] 🔄 ממיר היסטוריה קיימה להצפנה...")
+                    logger.info("Converting existing history to encryption...")
                     save_browsing_history()
-                    print("[HISTORY] ✅ היסטוריה הומרה להצפנה")
+                    logger.info("History converted to encryption")
 
             except FileNotFoundError:
-                print(f"[HISTORY] 🆕 לא נמצאו קבצי היסטוריה - יוצר חדש")
+                logger.info("No history files found - creating new")
                 browsing_history = {}
                 save_browsing_history()
 
     except Exception as e:
-        print(f"[HISTORY] ❌ שגיאה בטעינת היסטוריה: {e}")
+        logger.error(f"Error loading history: {e}")
         browsing_history = {}
 
 
 def add_to_browsing_history(child_name, entries):
-    """הוספת רשומות להיסטוריית גלישה - פונקציה גלובלית מתוקנת"""
+    """
+    Add entries to browsing history - corrected global function.
+
+    Args:
+        child_name (str): Name of the child
+        entries (list): List of browsing history entries
+    """
     global browsing_history
 
     if not child_name or not entries:
-        print(f"[HISTORY] ❌ נתונים ריקים: child_name='{child_name}', entries={len(entries) if entries else 0}")
+        logger.error(f"Empty data: child_name='{child_name}', entries={len(entries) if entries else 0}")
         return
 
-    print(f"[HISTORY] 📥 מתחיל עיבוד היסטוריה עבור {child_name}: {len(entries)} רשומות חדשות")
+    logger.info(f"Processing history for {child_name}: {len(entries)} new entries")
 
     with history_lock:
         try:
             if child_name not in browsing_history:
                 browsing_history[child_name] = []
-                print(f"[HISTORY] 🆕 יצרתי רשימה חדשה עבור {child_name}")
+                logger.info(f"Created new list for {child_name}")
 
             old_count = len(browsing_history[child_name])
             browsing_history[child_name].extend(entries)
             new_count = len(browsing_history[child_name])
 
-            print(f"[HISTORY] ✅ נוספו {len(entries)} רשומות. סה\"כ: {old_count} → {new_count}")
+            logger.info(f"Added {len(entries)} entries. Total: {old_count} → {new_count}")
 
             if len(browsing_history[child_name]) > 5000:
                 removed = len(browsing_history[child_name]) - 5000
                 browsing_history[child_name] = browsing_history[child_name][-5000:]
-                print(f"[HISTORY] 🗑️ הוסרו {removed} רשומות ישנות (שמירה על 5000)")
+                logger.info(f"Removed {removed} old entries (keeping 5000)")
 
             try:
                 save_browsing_history()
-                print(f"[HISTORY] 💾 היסטוריה נשמרה בהצלחה לקובץ")
+                logger.info("History saved to file successfully")
             except Exception as save_error:
-                print(f"[HISTORY] ❌ שגיאה בשמירה: {save_error}")
+                logger.error(f"Error saving: {save_error}")
 
         except Exception as e:
-            print(f"[HISTORY] ❌ שגיאה קריטית בעיבוד היסטוריה: {e}")
+            logger.error(f"Critical error processing history: {e}")
             import traceback
             traceback.print_exc()
 
 
-class UserManager:
-    """מחלקה לניהול משתמשים - הרשמה, התחברות ושמירת נתונים מוצפן"""
+class BaseManager(ABC):
+    """Abstract base class for all manager classes"""
+
+    def __init__(self, name: str):
+        self.name = name
+        self.logger = logging.getLogger(f"{__name__}.{name}")
+        self.is_initialized = False
+        self.is_running = False
+
+    @abstractmethod
+    def initialize(self) -> bool:
+        """Initialize the manager"""
+        pass
+
+    @abstractmethod
+    def cleanup(self) -> bool:
+        """Cleanup resources"""
+        pass
+
+    def start(self) -> bool:
+        """Start the manager"""
+        if not self.is_initialized:
+            if not self.initialize():
+                return False
+        self.is_running = True
+        self.logger.info(f"{self.name} started successfully")
+        return True
+
+    def stop(self) -> bool:
+        """Stop parent server with VPN/DNS protection cleanup"""
+        logger.info("Stopping parent server...")
+
+        # עצור ניטור VPN/DNS
+        if hasattr(self, 'vpn_dns_protection'):
+            self.vpn_dns_protection.stop_monitoring()
+            self.running = False
+        """Stop the manager"""
+        if self.is_running:
+            self.is_running = False
+            result = self.cleanup()
+            self.logger.info(f"{self.name} stopped")
+            return result
+        return True
+
+
+class UserManager(BaseManager):
+    """
+    User management class - registration, login and encrypted data storage.
+    """
 
     def __init__(self, data_file='users_data.json'):
+        """
+        Initialize UserManager with encrypted data file.
+
+        Args:
+            data_file (str): Path to user data file
+        """
+        super().__init__("UserManager")
         self.data_file = data_file
         self.users = {}
+        self._lock = threading.Lock()
         self.load_users_encrypted()
+        logger.info("UserManager initialized")
 
     def load_users_encrypted(self):
-        """טעינת נתוני משתמשים - גרסה מוצפנת"""
+        """Load user data - encrypted version"""
         if file_manager is None:
             initialize_encryption()
 
         try:
-            # נסיון טעינה מוצפנת תחילה
+            # Try encrypted load first
             self.users = file_manager.safe_load_json(self.data_file, encrypted=True)
 
             if self.users:
-                print(f"[🔒] נטענו נתונים מוצפנים עבור {len(self.users)} משתמשים")
+                logger.info(f"Loaded encrypted data for {len(self.users)} users")
                 return
 
-            # אם אין מוצפן, נסה רגיל והמר
+            # If no encrypted file, try regular and convert
             try:
                 with open(self.data_file, 'r', encoding='utf-8') as f:
                     self.users = json.load(f)
-                print(f"[*] נטענו נתונים עבור {len(self.users)} משתמשים")
-                # המר להצפנה
+                logger.info(f"Loaded data for {len(self.users)} users")
+                # Convert to encryption
                 self.save_users_encrypted()
-                print("[*] נתוני משתמשים הומרו להצפנה")
+                logger.info("User data converted to encryption")
             except FileNotFoundError:
-                # יצירת משתמש דמו
+                # Create demo user
                 self.users = {
                     'admin@example.com': {
-                        'fullname': 'מנהל המערכת',
+                        'fullname': 'System Administrator',
                         'password_hash': self._hash_password('admin123')
                     }
                 }
                 self.save_users_encrypted()
-                print("[*] נוצר קובץ משתמשים חדש מוצפן")
+                logger.info("New encrypted user file created")
         except Exception as e:
-            print(f"[!] שגיאה בטעינת נתוני משתמשים: {e}")
+            logger.error(f"Error loading user data: {e}")
             self.users = {}
 
     def save_users_encrypted(self):
-        """שמירת נתוני משתמשים - גרסה מוצפנת"""
+        """Save user data - encrypted version"""
         if file_manager is None:
             initialize_encryption()
 
         try:
             success = file_manager.safe_save_json(self.data_file, self.users, encrypted=True)
             if success:
-                print("[🔒] נתוני משתמשים נשמרו מוצפנים")
+                logger.info("User data saved encrypted")
             else:
-                print("[!] שגיאה בשמירת נתוני משתמשים מוצפנים")
+                logger.error("Error saving encrypted user data")
         except Exception as e:
-            print(f"[!] שגיאה בשמירת נתוני משתמשים: {e}")
+            logger.error(f"Error saving user data: {e}")
 
     def _hash_password(self, password):
-        """הצפנת סיסמה"""
+        """
+        Hash password using SHA-256.
+
+        Args:
+            password (str): Plain text password
+
+        Returns:
+            str: Hashed password
+        """
         return hashlib.sha256(password.encode('utf-8')).hexdigest()
 
     def register_user(self, email, fullname, password):
-        """רישום משתמש חדש"""
+        """
+        Register new user.
+
+        Args:
+            email (str): User email address
+            fullname (str): User full name
+            password (str): User password
+
+        Returns:
+            tuple: (success: bool, message: str)
+        """
         if not email or not fullname or not password:
-            return False, "יש למלא את כל השדות"
+            return False, "All fields must be filled"
 
         if email in self.users:
-            return False, "כתובת האימייל כבר קיימת במערכת"
+            return False, "Email address already exists in system"
 
         if len(password) < 6:
-            return False, "הסיסמה חייבת להכיל לפחות 6 תווים"
+            return False, "Password must contain at least 6 characters"
 
-        # הוספת המשתמש
+        # Add user
         self.users[email] = {
             'fullname': fullname,
             'password_hash': self._hash_password(password)
         }
 
         self.save_users_encrypted()
-        print(f"[+] משתמש חדש נרשם: {email}")
-        return True, "המשתמש נרשם בהצלחה"
+        logger.info(f"New user registered: {email}")
+        return True, "User registered successfully"
 
     def validate_login(self, email, password):
-        """אימות כניסת משתמש"""
+        """
+        Validate user login.
+
+        Args:
+            email (str): User email
+            password (str): User password
+
+        Returns:
+            bool: True if login valid, False otherwise
+        """
         if email not in self.users:
             return False
 
@@ -444,32 +600,79 @@ class UserManager:
         return self.users[email]['password_hash'] == password_hash
 
     def get_user_fullname(self, email):
-        """קבלת שם מלא של משתמש"""
+        """
+        Get user full name.
+
+        Args:
+            email (str): User email
+
+        Returns:
+            str or None: User full name or None if not found
+        """
         if email in self.users:
             return self.users[email]['fullname']
         return None
 
+    def initialize(self) -> bool:
+        """Initialize user manager"""
+        try:
+            self.load_users_encrypted()
+            self.is_initialized = True
+            return True
+        except Exception as e:
+            self.logger.error(f"Failed to initialize: {e}")
+            return False
 
-class ParentServer:
+    def cleanup(self) -> bool:
+        """Cleanup user manager"""
+        try:
+            self.save_users_encrypted()
+            return True
+        except Exception as e:
+            self.logger.error(f"Cleanup error: {e}")
+            return False
+
+    def get_user_info(self, email) -> Optional[Dict]:
+        """Get complete user information"""
+        with self._lock:
+            if email in self.users:
+                user_info = self.users[email].copy()
+                user_info.pop('password_hash', None)
+                return user_info
+            return None
+
+
+class ParentServer(BaseManager):
+    """
+    Main parent server class handling encrypted communication with children.
+    """
+
     def __init__(self):
+        """Initialize parent server with encrypted data loading."""
+        super().__init__("ParentServer")
         self.running = True
         self.server_socket = None
         self.connection_threads = []
         self.threads_lock = threading.Lock()
 
-        # טעינת נתונים מוצפנים
+        self.vpn_dns_protection = VPNDNSProtection()
+        self.vpn_dns_protection.start_monitoring(check_interval=60)  # בדיקה כל דקה
+
+        # Load encrypted data
         load_children_data()
         load_browsing_history()
 
-        # הפעלת שמירה תקופתית
+        # Start periodic save
         self.start_periodic_save()
 
-        # הפעלת ניקוי threads
+        # Start thread cleanup
         self.cleanup_thread = threading.Thread(target=self._cleanup_dead_threads, daemon=True)
         self.cleanup_thread.start()
 
+        logger.info("ParentServer initialized with encrypted data")
+
     def _cleanup_dead_threads(self):
-        """ניקוי threads שמתו כל 30 שניות"""
+        """Clean up dead threads every 30 seconds"""
         while self.running:
             try:
                 time.sleep(30)
@@ -478,12 +681,12 @@ class ParentServer:
                     removed_count = len(self.connection_threads) - len(alive_threads)
                     if removed_count > 0:
                         self.connection_threads = alive_threads
-                        print(f"[CLEANUP] 🧹 נוקו {removed_count} threads מתים")
+                        logger.debug(f"Cleaned {removed_count} dead threads")
             except Exception as e:
-                print(f"[!] שגיאה בניקוי threads: {e}")
+                logger.error(f"Error cleaning threads: {e}")
 
     def start_periodic_save(self):
-        """הפעלת שמירה תקופתית כל 30 שניות"""
+        """Start periodic save every 30 seconds"""
 
         def save_periodically():
             while self.running:
@@ -491,87 +694,198 @@ class ParentServer:
                     time.sleep(30)
                     save_browsing_history()
                 except Exception as e:
-                    print(f"[SAVE] ❌ שגיאה בשמירה תקופתית: {e}")
+                    logger.error(f"Error in periodic save: {e}")
 
         save_thread = threading.Thread(target=save_periodically, daemon=True, name="PeriodicSaver")
         save_thread.start()
-        print(f"[SAVE] 🕒 שמירה תקופתית הופעלה")
+        logger.info("Periodic save started")
 
     def add_child(self, child_name):
-        """הוספת ילד חדש"""
-        print(f"[DEBUG] 🔹 מנסה להוסיף ילד: '{child_name}'")
+        """
+        Add new child to system.
+
+        Args:
+            child_name (str): Name of child to add
+
+        Returns:
+            bool: True if child added successfully, False otherwise
+        """
+        logger.debug(f"Trying to add child: '{child_name}'")
 
         if not child_name or not child_name.strip():
-            print("[DEBUG] ❌ שם ילד ריק")
-            return False
+            raise DataValidationError("Child name cannot be empty")
 
         child_name = child_name.strip()
 
         with data_lock:
             if child_name in children_data:
-                print(f"[DEBUG] ❌ ילד '{child_name}' כבר קיים")
+                logger.debug(f"Child '{child_name}' already exists")
                 return False
 
             children_data[child_name] = {
                 "blocked_domains": set(),
                 "client_address": None,
-                "last_seen": None
+                "last_seen": None,
+                "created_at": time.time()
             }
 
-            print(f"[DEBUG] ✅ ילד '{child_name}' נוסף למילון")
-            print(f"[DEBUG] כעת יש {len(children_data)} ילדים")
+            logger.debug(f"Child '{child_name}' added to dictionary")
+            logger.debug(f"Now have {len(children_data)} children")
 
             try:
                 save_children_data()
-                print(f"[+] ✅ ילד '{child_name}' נוסף בהצלחה ונשמר")
+                logger.info(f"Child '{child_name}' added successfully and saved")
                 return True
             except Exception as e:
-                print(f"[!] ❌ שגיאה בשמירת ילד חדש: {e}")
+                logger.error(f"Error saving new child: {e}")
                 del children_data[child_name]
                 return False
 
+    def notify_child_immediate(self, child_name: str) -> None:
+        """
+        Send immediate encrypted update to child.
+
+        Args:
+            child_name (str): Name of child to notify
+        """
+        logger.debug(f"Trying to update {child_name} with encrypted communication...")
+        with data_lock:
+            if child_name in active_connections:
+                conn_info = active_connections[child_name]
+                if conn_info and conn_info.get("socket"):
+                    try:
+                        sock = conn_info["socket"]
+                        domains = list(children_data[child_name]['blocked_domains'])
+                        # Encrypted send
+                        Protocol.send_message(sock, Protocol.UPDATE_DOMAINS, {"domains": domains})
+                        logger.info(f"Sent immediate encrypted update to {child_name}")
+                        # Add immediate DNS cache clear command
+                        try:
+                            Protocol.send_message(sock, "FORCE_DNS_CLEAR", {})
+                            logger.info(f"Sent immediate DNS clear command to {child_name}")
+                        except:
+                            pass
+                    except Exception as e:
+                        logger.error(f"Error in encrypted update {child_name}: {e}")
+
     def remove_child(self, child_name):
-        """מחיקת ילד"""
-        print(f"[DEBUG] 🔹 מנסה למחוק ילד: '{child_name}'")
+        """
+        Remove child from system.
+
+        Args:
+            child_name (str): Name of child to remove
+
+        Returns:
+            bool: True if child removed successfully, False otherwise
+        """
+        logger.debug(f"Trying to remove child: '{child_name}'")
 
         if not child_name or not child_name.strip():
-            print("[DEBUG] ❌ שם ילד ריק")
+            logger.debug("Empty child name")
             return False
 
         child_name = child_name.strip()
 
         with data_lock:
             if child_name not in children_data:
-                print(f"[DEBUG] ❌ ילד '{child_name}' לא קיים")
+                logger.debug(f"Child '{child_name}' does not exist")
                 return False
 
-            # מחיקת הילד
+            # Remove child
             del children_data[child_name]
 
-            # מחיקת ההיסטוריה שלו
+            # Remove their history
             with history_lock:
                 if child_name in browsing_history:
                     del browsing_history[child_name]
 
-            print(f"[DEBUG] ✅ ילד '{child_name}' נמחק מהמילון")
+            logger.debug(f"Child '{child_name}' removed from dictionary")
 
             try:
                 save_children_data()
                 save_browsing_history()
-                print(f"[+] ✅ ילד '{child_name}' נמחק בהצלחה")
+                logger.info(f"Child '{child_name}' removed successfully")
                 return True
             except Exception as e:
-                print(f"[!] ❌ שגיאה בשמירה אחרי מחיקה: {e}")
+                logger.error(f"Error saving after removal: {e}")
                 return False
 
+    def send_security_alert(self, security_result):
+        """Send security alert to parent dashboard"""
+        alert_data = {
+            "type": "SECURITY_ALERT",
+            "timestamp": time.time(),
+            "client_ip": security_result["client_ip"],
+            "risk_level": security_result["overall_risk"],
+            "vpn_detected": security_result["vpn_check"].get("vpn_detected", False),
+            "vpn_provider": security_result["vpn_check"].get("vpn_provider"),
+            "dns_issues": security_result["dns_check"].get("issues", []),
+            "actions_taken": security_result["actions_taken"]
+        }
+
+        # הוסף לרשימת התראות אבטחה
+        with history_lock:
+            if "security_alerts" not in browsing_history:
+                browsing_history["security_alerts"] = []
+
+            browsing_history["security_alerts"].append(alert_data)
+
+            # שמור את ההיסטוריה המעודכנת
+            save_browsing_history()
+
+        logger.critical(f"🔒 SECURITY ALERT LOGGED: {alert_data}")
+
+        # שלח התראה מיידית לממשק האינטרנט (אם יש חיבור פעיל)
+        self._broadcast_security_alert(alert_data)
+
+    def _broadcast_security_alert(self, alert_data):
+        """Broadcast security alert to web interface"""
+        try:
+            # זה יכול להיות דרך WebSocket או polling
+            # לעת עתה רק נתעד ב-log
+            logger.info(f"Broadcasting security alert to web interface")
+        except Exception as e:
+            logger.error(f"Failed to broadcast security alert: {e}")
+
     def handle_child_connection(self, client_socket, address):
-        print(f"[*] חיבור חדש מ-{address}")
+        """
+        Handle encrypted connection from child device.
+
+        Args:
+            client_socket (socket.socket): Client socket connection
+            address (tuple): Client address (IP, port)
+        """
+        client_ip = address[0]
+
+        # בדיקת אבטחה לפני המשך
+        security_result = self.vpn_dns_protection.check_client_security(client_ip)
+
+        if security_result["overall_risk"] == "high":
+            logger.critical(f"🚨 HIGH SECURITY RISK from {client_ip}")
+            logger.critical(f"VPN detected: {security_result['vpn_check'].get('vpn_detected', False)}")
+            logger.critical(f"DNS issues: {security_result['dns_check'].get('issues', [])}")
+
+            # שלח התראת אבטחה לממשק ההורה
+            self.send_security_alert(security_result)
+
+            # סגור חיבור
+            try:
+                client_socket.close()
+            except:
+                pass
+            return
+
+        elif security_result["overall_risk"] == "medium":
+            logger.warning(f"⚠️ MEDIUM SECURITY RISK from {client_ip}")
+            self.send_security_alert(security_result)
+
+        logger.info(f"New connection from {address}")
         child_name = None
 
         try:
-            # שימוש בפרוטוקול המוצפן
-            msg_type, data = Protocol.receive_message(client_socket)
-            print(f"[DEBUG] התקבלה הודעה מוצפנת: {msg_type}, נתונים: {data}")
+            # Use encrypted protocol
+            msg_type, data = Protocol.receive_message(client_socket) #type:ignore
+            logger.debug(f"Received encrypted message: {msg_type}, data: {data}")
 
             if msg_type == Protocol.REGISTER_CHILD:
                 child_name = data.get('name')
@@ -580,24 +894,24 @@ class ParentServer:
                         children_data[child_name]['client_address'] = address
                         children_data[child_name]['last_seen'] = time.time()
 
-                    Protocol.send_message(client_socket, Protocol.ACK, {"status": "registered"})
-                    print(f"[+] {child_name} נרשם בהצלחה")
+                    Protocol.send_message(client_socket, Protocol.ACK, {"status": "registered"}) # type: ignore
+                    logger.info(f"{child_name} registered successfully")
 
                     active_connections[child_name] = {"socket": client_socket, "address": address}
                     self.handle_child_communication(client_socket, child_name)
                 else:
-                    Protocol.send_message(client_socket, Protocol.ERROR, {"message": "Invalid child name"})
-                    print(f"[!] שם ילד לא תקין: {child_name}")
+                    Protocol.send_message(client_socket, Protocol.ERROR, {"message": "Invalid child name"}) # type: ignore
+                    logger.warning(f"Invalid child name: {child_name}")
 
             elif msg_type == Protocol.VERIFY_CHILD:
                 requested_child = data.get("child_name")
-                print(f"[VERIFY] בקשת אימות עבור: '{requested_child}'")
+                logger.info(f"Verification request for: '{requested_child}'")
 
                 with data_lock:
                     is_valid = requested_child in children_data
 
-                Protocol.send_message(client_socket, Protocol.VERIFY_RESPONSE, {"is_valid": is_valid})
-                print(f"[VERIFY] תגובה ל-'{requested_child}': {'✅ תקף' if is_valid else '❌ לא תקף'}")
+                Protocol.send_message(client_socket, Protocol.VERIFY_RESPONSE, {"is_valid": is_valid}) # type: ignore
+                logger.info(f"Response to '{requested_child}': {'valid' if is_valid else 'invalid'}")
 
                 if is_valid:
                     with data_lock:
@@ -606,7 +920,7 @@ class ParentServer:
 
                     child_name = requested_child
                     active_connections[requested_child] = {"socket": client_socket, "address": address}
-                    print(f"[+] ילד '{requested_child}' אומת ונרשם")
+                    logger.info(f"Child '{requested_child}' verified and registered")
 
                     self.handle_child_communication(client_socket, child_name)
                 else:
@@ -614,7 +928,7 @@ class ParentServer:
                     return
 
         except Exception as e:
-            print(f"[!] שגיאה בחיבור {child_name}: {e}")
+            logger.error(f"Error in connection {child_name}: {e}")
             import traceback
             traceback.print_exc()
         finally:
@@ -625,90 +939,99 @@ class ParentServer:
                         children_data[child_name]['client_address'] = None
                     if child_name in active_connections:
                         del active_connections[child_name]
-                print(f"[-] {child_name} התנתק")
+                logger.info(f"{child_name} disconnected")
 
     def handle_child_communication(self, client_socket, child_name):
-        """טיפול בתקשורת מוצפנת עם ילד"""
-        print(f"[COMM] 🔄 התחלת תקשורת מוצפנת עם {child_name}")
+        """
+        Handle encrypted communication with child.
+
+        Args:
+            client_socket (socket.socket): Child socket connection
+            child_name (str): Name of the child
+        """
+        logger.info(f"Started encrypted communication with {child_name}")
 
         while self.running:
             try:
                 client_socket.settimeout(30)
                 msg_type, data = Protocol.receive_message(client_socket)
-                print(f"[COMM] 📨 התקבלה הודעה מוצפנת: {msg_type} מ-{child_name}")
+                logger.debug(f"Received encrypted message: {msg_type} from {child_name}")
 
                 if msg_type == Protocol.GET_DOMAINS:
                     with data_lock:
                         domains = list(children_data[child_name]['blocked_domains'])
                     Protocol.send_message(client_socket, Protocol.UPDATE_DOMAINS, {"domains": domains})
-                    print(f"[COMM] 📤 נשלחו דומיינים מוצפנים ל-{child_name}: {domains}")
+                    logger.debug(f"Sent encrypted domains to {child_name}: {domains}")
 
                 elif msg_type == Protocol.CHILD_STATUS:
                     with data_lock:
                         children_data[child_name]['last_seen'] = time.time()
                     Protocol.send_message(client_socket, Protocol.ACK)
-                    print(f"[COMM] ✅ ACK מוצפן נשלח ל-{child_name}")
+                    logger.debug(f"Encrypted ACK sent to {child_name}")
 
                 elif msg_type == Protocol.BROWSING_HISTORY:
-                    print(f"[COMM] 🔍 מעבד הודעת היסטוריה מוצפנת מ-{child_name}...")
+                    logger.debug(f"Processing encrypted history message from {child_name}...")
 
                     if not isinstance(data, dict):
-                        print(f"[COMM] ❌ נתונים לא תקינים - לא מילון: {type(data)}")
+                        logger.error(f"Invalid data - not dictionary: {type(data)}")
                         continue
 
                     child_name_from_data = data.get("child_name")
                     history_entries = data.get("history", [])
 
                     if not child_name_from_data:
-                        print(f"[COMM] ❌ שם ילד ריק")
+                        logger.error("Empty child name")
                         continue
 
                     if not isinstance(history_entries, list):
-                        print(f"[COMM] ❌ רשומות היסטוריה לא רשימה: {type(history_entries)}")
+                        logger.error(f"History entries not list: {type(history_entries)}")
                         continue
 
                     if len(history_entries) == 0:
-                        print(f"[COMM] ⚠️ רשימת היסטוריה ריקה")
-                        Protocol.send_message(client_socket, Protocol.ACK)
+                        logger.warning("Empty history list")
+                        Protocol.send_message(client_socket, Protocol.ACK, {})
                         continue
 
                     try:
-                        print(f"[COMM] 🔄 מוסיף היסטוריה מוצפנת לבסיס הנתונים...")
+                        logger.debug("Adding encrypted history to database...")
                         add_to_browsing_history(child_name_from_data, history_entries)
 
                         Protocol.send_message(client_socket, Protocol.ACK)
-                        print(f"[COMM] ✅ היסטוריה מוצפנת מ-{child_name} עובדה בהצלחה וACK נשלח")
+                        logger.info(f"Encrypted history from {child_name} processed successfully and ACK sent")
 
                     except Exception as history_error:
-                        print(f"[COMM] ❌ שגיאה בעיבוד היסטוריה מוצפנת: {history_error}")
+                        logger.error(f"Error processing encrypted history: {history_error}")
                         continue
 
                 elif msg_type == Protocol.ERROR:
-                    print(f"[COMM] ❌ שגיאה מהילד {child_name}: {data}")
+                    logger.error(f"Error from child {child_name}: {data}")
                     break
 
             except socket.timeout:
                 continue
             except Exception as e:
-                print(f"[COMM] ❌ שגיאה בתקשורת מוצפנת עם {child_name}: {e}")
+                logger.error(f"Error in encrypted communication with {child_name}: {e}")
                 break
 
-        print(f"[COMM] 🔚 סיום תקשורת מוצפנת עם {child_name}")
+        logger.info(f"Ended encrypted communication with {child_name}")
 
     def start_communication_server(self):
+        """Start encrypted communication server for child connections."""
+
         def run_server():
             self.server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             self.server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             self.server_socket.bind(('', COMMUNICATION_PORT))
             self.server_socket.listen(5)
-            print(f"[*] 🔒 שרת תקשורת מוצפן מאזין על פורט {COMMUNICATION_PORT}")
+            logger.info(f"Encrypted communication server listening on port {COMMUNICATION_PORT}")
 
             while self.running:
                 try:
                     client_socket, address = self.server_socket.accept()
                     with self.threads_lock:
                         if len(self.connection_threads) >= 50:
-                            print(f"[!] יותר מדי חיבורים ({len(self.connection_threads)}) - דוחה חיבור")
+                            logger.warning(
+                                f"Too many connections ({len(self.connection_threads)}) - rejecting connection")
                             client_socket.close()
                             continue
 
@@ -724,22 +1047,22 @@ class ParentServer:
 
                 except Exception as e:
                     if self.running:
-                        print(f"[!] שגיאה בקבלת חיבור: {e}")
+                        logger.error(f"Error accepting connection: {e}")
 
         comm_thread = threading.Thread(target=run_server, name="CommunicationServer")
         comm_thread.daemon = True
         comm_thread.start()
 
     def shutdown(self):
-        """סגירה נקייה של שרת ההורים"""
-        print("[*] מתחיל סגירה נקייה של שרת ההורים...")
+        """Clean shutdown of parent server"""
+        logger.info("Starting clean shutdown of parent server...")
 
         self.running = False
 
         if self.server_socket:
             try:
                 self.server_socket.close()
-                print("[*] שרת תקשורת מוצפן נסגר")
+                logger.info("Encrypted communication server closed")
             except:
                 pass
 
@@ -753,21 +1076,83 @@ class ParentServer:
                 pass
 
         active_connections.clear()
-        print(f"[*] ניתקתי {disconnected} ילדים")
+        logger.info(f"Disconnected {disconnected} children")
 
         try:
             save_children_data()
             save_browsing_history()
-            print("[*] ✅ נתונים מוצפנים נשמרו")
+            logger.info("Encrypted data saved")
         except Exception as e:
-            print(f"[!] שגיאה בשמירת נתונים: {e}")
+            logger.error(f"Error saving data: {e}")
 
-        print("[*] 🎉 סגירת שרת ההורים הושלמה")
+        logger.info("Parent server shutdown completed")
+
+    def initialize(self) -> bool:
+        """Initialize server"""
+        try:
+            self.is_initialized = True
+            return True
+        except Exception as e:
+            self.logger.error(f"Failed to initialize: {e}")
+            return False
+
+    def cleanup(self) -> bool:
+        """Cleanup server"""
+        try:
+            self.shutdown()  # הפונקציה הקיימת שלך
+            return True
+        except Exception as e:
+            self.logger.error(f"Error during cleanup: {e}")
+            return False
+
+    def add_blocked_domain(self, child_name: str, domain: str) -> bool:
+        """Add blocked domain with validation"""
+        if not child_name or not domain:
+            raise DataValidationError("Child name and domain cannot be empty")
+
+        domain = domain.strip().lower()
+
+        with data_lock:
+            if child_name not in children_data:
+                raise DataValidationError(f"Child '{child_name}' does not exist")
+
+            children_data[child_name]['blocked_domains'].add(domain)
+            save_children_data()
+            self.logger.info(f"Domain '{domain}' added to '{child_name}'")
+            return True
+
+    def remove_blocked_domain(self, child_name: str, domain: str) -> bool:
+        """Remove blocked domain with validation"""
+        if not child_name or not domain:
+            raise DataValidationError("Child name and domain cannot be empty")
+
+        domain = domain.strip().lower()
+
+        with data_lock:
+            if child_name not in children_data:
+                raise DataValidationError(f"Child '{child_name}' does not exist")
+
+            if domain in children_data[child_name]['blocked_domains']:
+                children_data[child_name]['blocked_domains'].remove(domain)
+                save_children_data()
+                self.logger.info(f"Domain '{domain}' removed from '{child_name}'")
+                return True
+            return False
 
 
 class ParentHandler(http.server.SimpleHTTPRequestHandler):
+    """
+    HTTP request handler for parent web interface.
+    Handles authentication, child management, and browsing history.
+    """
+
     def get_cookies(self):
-        """קבלת עוגיות מהבקשה"""
+        """
+        Get cookies from request.
+
+        Returns:
+            dict: Dictionary of cookie name-value pairs
+        """
         cookies = {}
         if "Cookie" in self.headers:
             raw_cookies = self.headers["Cookie"].split(";")
@@ -778,37 +1163,20 @@ class ParentHandler(http.server.SimpleHTTPRequestHandler):
         return cookies
 
     def is_logged_in(self):
-        """בדיקת מצב התחברות"""
+        """
+        Check login status.
+
+        Returns:
+            str or None: User email if logged in, None otherwise
+        """
         cookies = self.get_cookies()
         email = cookies.get("user_email")
         if email and user_manager.get_user_fullname(email):
             return email
         return None
 
-    def notify_child_immediate(self, child_name):
-        """עדכון מיידי מוצפן לילד"""
-        print(f"[DEBUG] מנסה לעדכן {child_name} בתקשורת מוצפנת...")
-        with data_lock:
-            if child_name in active_connections:
-                conn_info = active_connections[child_name]
-                if conn_info and conn_info.get("socket"):
-                    try:
-                        sock = conn_info["socket"]
-                        domains = list(children_data[child_name]['blocked_domains'])
-                        # שליחה מוצפנת
-                        Protocol.send_message(sock, Protocol.UPDATE_DOMAINS, {"domains": domains})
-                        print(f"[*] נשלח עדכון מוצפן מיידי ל-{child_name}")
-                        # הוספת פקודת ניקוי cache מיידית
-                        try:
-                            Protocol.send_message(sock, "FORCE_DNS_CLEAR", {})
-                            print(f"[*] נשלחה פקודת ניקוי DNS מיידית ל-{child_name}")
-                        except:
-                            pass
-                    except Exception as e:
-                        print(f"[!] שגיאה בעדכון מוצפן {child_name}: {e}")
-
     def end_headers(self):
-        """הוספת headers אבטחה ל-HTTPS"""
+        """Add security headers for HTTPS"""
         self.send_header('Strict-Transport-Security', 'max-age=31536000')
         self.send_header('X-Content-Type-Options', 'nosniff')
         self.send_header('X-Frame-Options', 'DENY')
@@ -816,6 +1184,7 @@ class ParentHandler(http.server.SimpleHTTPRequestHandler):
         super().end_headers()
 
     def do_GET(self):
+        """Handle GET requests for web interface"""
         path = unquote(self.path)
         parsed_path = urlparse(path)
         query_params = parse_qs(parsed_path.query)
@@ -857,24 +1226,24 @@ class ParentHandler(http.server.SimpleHTTPRequestHandler):
 
             user_name = user_manager.get_user_fullname(logged_in_user)
 
-            # בדיקת מצב ההצפנה המסונכרנת
+            # Check synchronized encryption status
             encryption_enabled = encryption_system is not None and file_manager is not None
             protocol_encryption = Protocol.test_encryption()
 
-            # בדיקת קיום קבצים מוצפנים
+            # Check existence of encrypted files
             children_encrypted = os.path.exists('children_data.json.encrypted')
             history_encrypted = os.path.exists('browsing_history.json.encrypted')
             users_encrypted = os.path.exists('users_data.json.encrypted')
             communication_key = os.path.exists('communication_key.key')
 
-            # סטטיסטיקות מערכת
+            # System statistics
             total_children = len(children_data)
             total_domains_blocked = sum(len(info['blocked_domains']) for info in children_data.values())
             total_history_entries = sum(len(entries) for entries in browsing_history.values())
             connected_children = sum(1 for info in children_data.values() if info.get('client_address') is not None)
 
             status_color = "green" if encryption_enabled and protocol_encryption else "orange"
-            status_text = "מוצפן ומסונכרן 🔒" if encryption_enabled and protocol_encryption else "חלקי 🔓"
+            status_text = "Encrypted and Synchronized" if encryption_enabled and protocol_encryption else "Partial"
 
             system_html = f"""
             <!DOCTYPE html>
@@ -882,7 +1251,7 @@ class ParentHandler(http.server.SimpleHTTPRequestHandler):
             <head>
                 <meta charset="UTF-8">
                 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-                <title>מצב המערכת - בקרת הורים מוצפנת</title>
+                <title>System Status - Encrypted Parental Control</title>
                 <style>
                     body {{ 
                         font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; 
@@ -993,110 +1362,110 @@ class ParentHandler(http.server.SimpleHTTPRequestHandler):
             <body>
                 <div class="container">
                     <div class="header">
-                        <h1>🔒 מצב המערכת המוצפנת</h1>
-                        <p style="font-size: 1.2em; margin: 10px 0;">שלום {user_name}! בקרה מלאה על המערכת המאובטחת</p>
+                        <h1>🔒 Encrypted System Status</h1>
+                        <p style="font-size: 1.2em; margin: 10px 0;">Hello {user_name}! Full control over the secure system</p>
                     </div>
 
                     <div class="nav">
-                        <a href="/dashboard">🏠 דף הבית</a>
-                        <a href="/manage_children">👶 ניהול ילדים</a>
-                        <a href="/browsing_history">📊 היסטוריה</a>
-                        <a href="/system_status">📊 מצב המערכת</a>
-                        <a href="/logout">🚪 יציאה</a>
+                        <a href="/dashboard">🏠 Home</a>
+                        <a href="/manage_children">👶 Manage Children</a>
+                        <a href="/browsing_history">📊 History</a>
+                        <a href="/system_status">📊 System Status</a>
+                        <a href="/logout">🚪 Logout</a>
                     </div>
 
                     <div class="stats-grid">
                         <div class="stat-card">
                             <div class="stat-number">{total_children}</div>
-                            <div class="stat-label">ילדים במערכת</div>
+                            <div class="stat-label">Children in System</div>
                             <div class="connection-indicator {'online' if connected_children > 0 else 'offline'}"></div>
-                            <small>{connected_children} מחוברים מוצפנים</small>
+                            <small>{connected_children} encrypted connections</small>
                         </div>
                         <div class="stat-card">
                             <div class="stat-number">{total_domains_blocked}</div>
-                            <div class="stat-label">אתרים חסומים</div>
+                            <div class="stat-label">Blocked Sites</div>
                         </div>
                         <div class="stat-card">
                             <div class="stat-number">{total_history_entries}</div>
-                            <div class="stat-label">רשומות מוצפנות</div>
+                            <div class="stat-label">Encrypted Records</div>
                         </div>
                         <div class="stat-card">
                             <div class="stat-number">{"🔒" if encryption_enabled and protocol_encryption else "⚠️"}</div>
-                            <div class="stat-label">מצב הצפנה</div>
+                            <div class="stat-label">Encryption Status</div>
                         </div>
                     </div>
 
                     <div class="status-card">
-                        <h2>🔒 מצב הצפנה מסונכרנת</h2>
-                        <div class="status-indicator">סטטוס: {status_text}</div>
-                        <p>מערכת הצפנה דו-שכבתית: נתונים + תקשורת</p>
+                        <h2>🔒 Synchronized Encryption Status</h2>
+                        <div class="status-indicator">Status: {status_text}</div>
+                        <p>Dual-layer encryption system: data + communication</p>
 
                         <div style="margin-top: 20px;">
-                            <h3>📁 קבצי המערכת</h3>
+                            <h3>📁 System Files</h3>
                             <div class="file-status">
                                 <div>
-                                    <strong>נתוני ילדים</strong><br>
-                                    <small>רשימת ילדים ואתרים חסומים</small>
+                                    <strong>Children Data</strong><br>
+                                    <small>List of children and blocked sites</small>
                                 </div>
                                 <span class="status-badge {'encrypted' if children_encrypted else 'regular'}">
-                                    {'🔒 מוצפן' if children_encrypted else '🔓 רגיל'}
+                                    {'🔒 Encrypted' if children_encrypted else '🔓 Regular'}
                                 </span>
                             </div>
                             <div class="file-status">
                                 <div>
-                                    <strong>היסטוריית גלישה</strong><br>
-                                    <small>רשומות פעילות מוצפנות</small>
+                                    <strong>Browsing History</strong><br>
+                                    <small>Encrypted activity records</small>
                                 </div>
                                 <span class="status-badge {'encrypted' if history_encrypted else 'regular'}">
-                                    {'🔒 מוצפן' if history_encrypted else '🔓 רגיל'}
+                                    {'🔒 Encrypted' if history_encrypted else '🔓 Regular'}
                                 </span>
                             </div>
                             <div class="file-status">
                                 <div>
-                                    <strong>נתוני משתמשים</strong><br>
-                                    <small>פרטי התחברות מוצפנים</small>
+                                    <strong>User Data</strong><br>
+                                    <small>Encrypted login details</small>
                                 </div>
                                 <span class="status-badge {'encrypted' if users_encrypted else 'regular'}">
-                                    {'🔒 מוצפן' if users_encrypted else '🔓 רגיל'}
+                                    {'🔒 Encrypted' if users_encrypted else '🔓 Regular'}
                                 </span>
                             </div>
                             <div class="file-status">
                                 <div>
-                                    <strong>מפתח תקשורת</strong><br>
-                                    <small>הצפנת הודעות בין הורה לילד</small>
+                                    <strong>Communication Key</strong><br>
+                                    <small>Encryption of messages between parent and child</small>
                                 </div>
                                 <span class="status-badge {'encrypted' if communication_key else 'regular'}">
-                                    {'🔒 קיים' if communication_key else '❌ חסר'}
+                                    {'🔒 Exists' if communication_key else '❌ Missing'}
                                 </span>
                             </div>
                         </div>
                     </div>
 
                     <div class="status-card">
-                        <h3>🔐 מידע על ההצפנה המסונכרנת</h3>
+                        <h3>🔐 Synchronized Encryption Information</h3>
                         <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 15px; margin-top: 15px;">
                             <div style="background: #e8f4fd; padding: 15px; border-radius: 8px;">
-                                <strong>💾 הצפנת נתונים</strong><br>
-                                כל קובץ מוצפן ברמה צבאית (AES-256)
+                                <strong>💾 Data Encryption</strong><br>
+                                Every file encrypted at military level (AES-256)
                             </div>
                             <div style="background: #fff2e8; padding: 15px; border-radius: 8px;">
-                                <strong>📡 הצפנת תקשורת</strong><br>
-                                כל הודעה בין הורה לילד מוצפנת
+                                <strong>📡 Communication Encryption</strong><br>
+                                Every message between parent and child encrypted
                             </div>
                             <div style="background: #e8f8e8; padding: 15px; border-radius: 8px;">
-                                <strong>🔑 ניהול מפתחות</strong><br>
-                                מפתחות נפרדים לנתונים ותקשורת
+                                <strong>🔑 Key Management</strong><br>
+                                Separate keys for data and communication
                             </div>
                             <div style="background: #f0e8ff; padding: 15px; border-radius: 8px;">
-                                <strong>🔄 סנכרון אוטומטי</strong><br>
-                                המערכת מסנכרנת מפתחות אוטומטית
+                                <strong>🔄 Auto Sync</strong><br>
+                                System synchronizes keys automatically
                             </div>
                         </div>
                     </div>
 
                     <div style="text-align: center; margin: 30px 0;">
                         <p style="color: rgba(255,255,255,0.8); font-size: 14px;">
-                            מערכת בקרת הורים מוצפנת לחלוטין | הצפנה דו-שכבתית
+                            Fully Encrypted Parental Control System | Dual-Layer Encryption
                         </p>
                     </div>
                 </div>
@@ -1119,19 +1488,19 @@ class ParentHandler(http.server.SimpleHTTPRequestHandler):
 
             user_name = user_manager.get_user_fullname(logged_in_user)
 
-            # פילטרים
+            # Filters
             child_filter = query_params.get('child', [''])[0]
             status_filter = query_params.get('status', [''])[0]
             domain_filter = query_params.get('domain', [''])[0]
 
-            # בניית אפשרויות ילדים
+            # Build children options
             children_options = []
             with data_lock:
                 for child_name in children_data.keys():
                     selected = 'selected' if child_name == child_filter else ''
                     children_options.append(f'<option value="{child_name}" {selected}>{child_name}</option>')
 
-            # סינון והצגת היסטוריה
+            # Filter and display history
             filtered_history = []
             with history_lock:
                 for child_name, entries in browsing_history.items():
@@ -1139,32 +1508,32 @@ class ParentHandler(http.server.SimpleHTTPRequestHandler):
                         continue
 
                     for entry in entries:
-                        # סינון לפי סטטוס
+                        # Filter by status
                         if status_filter == 'blocked' and not entry.get('was_blocked', False):
                             continue
                         if status_filter == 'allowed' and entry.get('was_blocked', False):
                             continue
 
-                        # סינון לפי דומיין
+                        # Filter by domain
                         if domain_filter and domain_filter.lower() not in entry.get('domain', '').lower():
                             continue
 
                         filtered_history.append(entry)
 
-            # מיון לפי זמן (חדש ביותר קודם)
+            # Sort by time (newest first)
             filtered_history.sort(key=lambda x: x.get('timestamp', ''), reverse=True)
             filtered_history = filtered_history[:200]
 
-            # קיבוץ ההיסטוריה
+            # Group history
             grouped_history = group_browsing_by_main_site(filtered_history, time_window_minutes=30)
 
-            # בניית HTML לרשומות
+            # Build HTML for entries
             history_entries = []
             for entry in grouped_history:
                 formatted_entry = format_simple_grouped_entry(entry)
                 history_entries.append(formatted_entry)
 
-            # סטטיסטיקות
+            # Statistics
             unique_sites = len(
                 set(entry.get('display_name', entry.get('main_domain', '')) for entry in grouped_history))
             total_blocked = sum(1 for entry in grouped_history if entry.get('was_blocked', False))
@@ -1173,19 +1542,19 @@ class ParentHandler(http.server.SimpleHTTPRequestHandler):
             stats_cards = f'''
                 <div class="stat-card">
                     <div class="stat-number">{len(grouped_history)}</div>
-                    <div class="stat-label">פעילויות מוצגות</div>
+                    <div class="stat-label">Activities Shown</div>
                 </div>
                 <div class="stat-card">
                     <div class="stat-number">{unique_sites}</div>
-                    <div class="stat-label">אתרים ייחודיים</div>
+                    <div class="stat-label">Unique Sites</div>
                 </div>
                 <div class="stat-card">
                     <div class="stat-number">{total_blocked}</div>
-                    <div class="stat-label">פעילויות חסומות</div>
+                    <div class="stat-label">Blocked Activities</div>
                 </div>
                 <div class="stat-card">
                     <div class="stat-number">{total_allowed}</div>
-                    <div class="stat-label">פעילויות מותרות</div>
+                    <div class="stat-label">Allowed Activities</div>
                 </div>
             '''
 
@@ -1200,7 +1569,7 @@ class ParentHandler(http.server.SimpleHTTPRequestHandler):
                 history_html = history_html.replace('${history_entries}', ''.join(history_entries))
             else:
                 history_html = history_html.replace('${history_entries}',
-                                                    '<div class="empty-message">אין רשומות מתאימות לחיפוש</div>')
+                                                    '<div class="empty-message">No records matching search</div>')
 
             self.send_response(200)
             self.send_header('Content-type', 'text/html; charset=utf-8')
@@ -1217,13 +1586,13 @@ class ParentHandler(http.server.SimpleHTTPRequestHandler):
 
             user_name = user_manager.get_user_fullname(logged_in_user)
 
-            # בניית רשימת הילדים
+            # Build children list
             children_list = []
             with data_lock:
                 for child_name, child_info in children_data.items():
                     is_connected = child_info.get('client_address') is not None
                     status_class = "status-online" if is_connected else "status-offline"
-                    status_text = "מחובר מוצפן" if is_connected else "לא מחובר"
+                    status_text = "Connected Encrypted" if is_connected else "Not Connected"
                     encoded_child_name = quote(child_name)
 
                     children_list.append(f"""
@@ -1233,14 +1602,14 @@ class ParentHandler(http.server.SimpleHTTPRequestHandler):
                                 <div class="child-details">
                                     <h3>{child_name}</h3>
                                     <p class="{status_class}">{status_text}</p>
-                                    <p>{len(child_info['blocked_domains'])} אתרים חסומים</p>
+                                    <p>{len(child_info['blocked_domains'])} blocked sites</p>
                                 </div>
                             </div>
                             <div class="child-actions">
-                                <a href="/dashboard?child={encoded_child_name}" class="manage-btn">נהל חסימות</a>
+                                <a href="/dashboard?child={encoded_child_name}" class="manage-btn">Manage Blocks</a>
                                 <form method="post" action="/remove_child" style="display:inline;">
                                     <input type="hidden" name="child_name" value="{child_name}">
-                                    <button type="submit" class="danger-btn" onclick="return confirm('האם אתה בטוח שברצונך למחוק את {child_name}?')">מחק</button>
+                                    <button type="submit" class="danger-btn" onclick="return confirm('Are you sure you want to delete {child_name}?')">Delete</button>
                                 </form>
                             </div>
                         </div>
@@ -1248,7 +1617,7 @@ class ParentHandler(http.server.SimpleHTTPRequestHandler):
 
             manage_html = MANAGE_CHILDREN_TEMPLATE.replace('${user_name}', user_name)
             manage_html = manage_html.replace('${children_list}', ''.join(
-                children_list) if children_list else '<div style="padding: 20px; text-align: center; color: #666;">אין ילדים רשומים</div>')
+                children_list) if children_list else '<div style="padding: 20px; text-align: center; color: #666;">No registered children</div>')
             manage_html = manage_html.replace('${message}', '')
 
             self.send_response(200)
@@ -1278,7 +1647,7 @@ class ParentHandler(http.server.SimpleHTTPRequestHandler):
                                 <form method="post" action="/remove_domain" style="display:inline;">
                                     <input type="hidden" name="child" value="{selected_child}">
                                     <input type="hidden" name="domain" value="{domain}">
-                                    <button type="submit" class="remove-btn">הסר</button>
+                                    <button type="submit" class="remove-btn">Remove</button>
                                 </form>
                             </div>
                         """)
@@ -1289,14 +1658,14 @@ class ParentHandler(http.server.SimpleHTTPRequestHandler):
                 dashboard_html = dashboard_html.replace('${user_name}', user_name)
                 dashboard_html = dashboard_html.replace('${blocked_domains_html}',
                                                         ''.join(
-                                                            domains_html) if domains_html else '<div class="empty-message">אין דומיינים חסומים</div>')
+                                                            domains_html) if domains_html else '<div class="empty-message">No blocked domains</div>')
             else:
                 children_cards = []
                 with data_lock:
                     for child_name, child_info in children_data.items():
                         is_connected = child_info.get('client_address') is not None
                         status_class = "status-online" if is_connected else "status-offline"
-                        status_text = "מחובר מוצפן" if is_connected else "לא מחובר"
+                        status_text = "Connected Encrypted" if is_connected else "Not Connected"
                         encoded_child_name = quote(child_name)
 
                         children_cards.append(f"""
@@ -1305,7 +1674,7 @@ class ParentHandler(http.server.SimpleHTTPRequestHandler):
                                 <div class="child-name">{child_name}</div>
                                 <div class="child-status {status_class}">{status_text}</div>
                                 <p style="text-align: center; margin-top: 10px;">
-                                    {len(child_info['blocked_domains'])} אתרים חסומים
+                                    {len(child_info['blocked_domains'])} blocked sites
                                 </p>
                             </div>
                         """)
@@ -1325,6 +1694,7 @@ class ParentHandler(http.server.SimpleHTTPRequestHandler):
             self.send_error(404)
 
     def do_POST(self):
+        """Handle POST requests for web interface"""
         content_length = int(self.headers['Content-Length'])
         post_data = self.rfile.read(content_length)
         post_params = parse_qs(post_data.decode('utf-8'))
@@ -1340,12 +1710,18 @@ class ParentHandler(http.server.SimpleHTTPRequestHandler):
             child_name = post_params.get('child', [''])[0]
             domain = post_params.get('domain', [''])[0].strip()
 
-            if child_name and domain and child_name in children_data:
-                with data_lock:
-                    children_data[child_name]['blocked_domains'].add(domain)
-                save_children_data()
-                print(f"[+] נוסף דומיין {domain} עבור {child_name}")
-                self.notify_child_immediate(child_name)
+            if child_name and domain:
+                try:
+                    parent_server.add_blocked_domain(child_name, domain)
+                    parent_server.notify_child_immediate(child_name)
+                    logger.info(f"Added domain {domain} for {child_name}")
+
+                except DataValidationError as e:
+                    logger.warning(f"Validation error: {e}")
+                except EncryptionError as e:
+                    logger.error(f"Encryption error: {e}")
+                except Exception as e:
+                    logger.error(f"Unexpected error: {e}")
 
             encoded_child_name = quote(child_name)
             self.send_response(302)
@@ -1363,13 +1739,18 @@ class ParentHandler(http.server.SimpleHTTPRequestHandler):
             child_name = post_params.get('child', [''])[0]
             domain = post_params.get('domain', [''])[0].strip()
 
-            if child_name and domain and child_name in children_data:
-                with data_lock:
-                    if domain in children_data[child_name]['blocked_domains']:
-                        children_data[child_name]['blocked_domains'].remove(domain)
-                save_children_data()
-                print(f"[-] הוסר דומיין {domain} מ-{child_name}")
-                self.notify_child_immediate(child_name)
+            if child_name and domain:
+                try:
+                    parent_server.remove_blocked_domain(child_name, domain)
+                    parent_server.notify_child_immediate(child_name)
+                    logger.info(f"Removed domain {domain} from {child_name}")
+
+                except DataValidationError as e:
+                    logger.warning(f"Validation error: {e}")
+                except EncryptionError as e:
+                    logger.error(f"Encryption error: {e}")
+                except Exception as e:
+                    logger.error(f"Unexpected error: {e}")
 
             encoded_child_name = quote(child_name)
             self.send_response(302)
@@ -1383,7 +1764,7 @@ class ParentHandler(http.server.SimpleHTTPRequestHandler):
             confirm_password = post_params.get('confirm_password', [''])[0]
 
             if password != confirm_password:
-                error_message = '<div class="message error-message">הסיסמאות אינן תואמות</div>'
+                error_message = '<div class="message error-message">Passwords do not match</div>'
                 register_html = REGISTER_TEMPLATE.replace('${message}', error_message)
                 self.send_response(200)
                 self.send_header('Content-type', 'text/html; charset=utf-8')
@@ -1394,7 +1775,7 @@ class ParentHandler(http.server.SimpleHTTPRequestHandler):
             success, message = user_manager.register_user(email, fullname, password)
 
             if success:
-                success_message = '<div class="message success-message">ההרשמה הושלמה בהצלחה! כעת תוכל להתחבר</div>'
+                success_message = '<div class="message success-message">Registration completed successfully! You can now login</div>'
                 login_html = LOGIN_TEMPLATE.replace('${message}', success_message)
                 self.send_response(200)
                 self.send_header('Content-type', 'text/html; charset=utf-8')
@@ -1413,7 +1794,7 @@ class ParentHandler(http.server.SimpleHTTPRequestHandler):
             password = post_params.get('password', [''])[0]
 
             if not email or not password:
-                error_message = '<div class="message error-message">יש למלא את כל השדות</div>'
+                error_message = '<div class="message error-message">All fields must be filled</div>'
                 login_html = LOGIN_TEMPLATE.replace('${message}', error_message)
                 self.send_response(200)
                 self.send_header('Content-type', 'text/html; charset=utf-8')
@@ -1426,9 +1807,9 @@ class ParentHandler(http.server.SimpleHTTPRequestHandler):
                 self.send_header('Set-Cookie', f'user_email={quote(email)}; Path=/')
                 self.send_header('Location', '/dashboard')
                 self.end_headers()
-                print(f"[+] משתמש התחבר: {email}")
+                logger.info(f"User logged in: {email}")
             else:
-                error_message = '<div class="message error-message">שם משתמש או סיסמה שגויים</div>'
+                error_message = '<div class="message error-message">Invalid username or password</div>'
                 login_html = LOGIN_TEMPLATE.replace('${message}', error_message)
                 self.send_response(200)
                 self.send_header('Content-type', 'text/html; charset=utf-8')
@@ -1436,7 +1817,7 @@ class ParentHandler(http.server.SimpleHTTPRequestHandler):
                 self.wfile.write(login_html.encode('utf-8'))
 
         elif self.path == '/add_child':
-            print("[DEBUG] 🔹 נכנסתי לטיפול בהוספת ילד")
+            logger.debug("Entered add child handler")
 
             try:
                 logged_in_user = self.is_logged_in()
@@ -1447,28 +1828,33 @@ class ParentHandler(http.server.SimpleHTTPRequestHandler):
                     return
 
                 child_name = post_params.get('child_name', [''])[0].strip()
-                print(f"[DEBUG] שם הילד שהתקבל: '{child_name}'")
+                logger.debug(f"Received child name: '{child_name}'")
 
                 if child_name:
-                    success = parent_server.add_child(child_name)
-                    if success:
-                        print(f"[✅] ילד '{child_name}' נוסף בהצלחה!")
-                    else:
-                        print(f"[❌] כישלון בהוספת ילד '{child_name}'")
+                    try:
+                        success = parent_server.add_child(child_name)
+                        logger.info(f"Child '{child_name}' added successfully!")
+
+                    except DataValidationError as e:
+                        logger.warning(f"Validation error: {e}")
+                    except EncryptionError as e:
+                        logger.error(f"Encryption error: {e}")
+                    except Exception as e:
+                        logger.error(f"Unexpected error: {e}")
 
                 self.send_response(302)
                 self.send_header('Location', '/manage_children')
                 self.end_headers()
 
             except Exception as e:
-                print(f"[!] שגיאה ב-add_child: {e}")
+                logger.error(f"Error in add_child: {e}")
                 self.send_response(500)
                 self.send_header('Content-type', 'text/html')
                 self.end_headers()
                 self.wfile.write(b'<h1>Server Error</h1>')
 
         elif self.path == '/remove_child':
-            print("[DEBUG] 🔹 נכנסתי לטיפול במחיקת ילד")
+            logger.debug("Entered remove child handler")
 
             try:
                 logged_in_user = self.is_logged_in()
@@ -1479,21 +1865,21 @@ class ParentHandler(http.server.SimpleHTTPRequestHandler):
                     return
 
                 child_name = post_params.get('child_name', [''])[0].strip()
-                print(f"[DEBUG] שם הילד למחיקה: '{child_name}'")
+                logger.debug(f"Child name for removal: '{child_name}'")
 
                 if child_name:
                     success = parent_server.remove_child(child_name)
                     if success:
-                        print(f"[✅] ילד '{child_name}' נמחק בהצלחה!")
+                        logger.info(f"Child '{child_name}' removed successfully!")
                     else:
-                        print(f"[❌] כישלון במחיקת ילד '{child_name}'")
+                        logger.error(f"Failed to remove child '{child_name}'")
 
                 self.send_response(302)
                 self.send_header('Location', '/manage_children')
                 self.end_headers()
 
             except Exception as e:
-                print(f"[!] שגיאה ב-remove_child: {e}")
+                logger.error(f"Error in remove_child: {e}")
                 self.send_response(500)
                 self.send_header('Content-type', 'text/html')
                 self.end_headers()
@@ -1508,21 +1894,21 @@ class ParentHandler(http.server.SimpleHTTPRequestHandler):
                 return
 
             child_name = post_params.get('child', [''])[0].strip()
-            print(f"[DEBUG] בקשה למחיקת היסטוריה עבור: '{child_name}'")
+            logger.debug(f"Request to clear history for: '{child_name}'")
 
             if child_name:
                 with history_lock:
                     if child_name in browsing_history:
                         del browsing_history[child_name]
                         save_browsing_history()
-                        print(f"[+] ✅ היסטוריה של '{child_name}' נמחקה בהצלחה")
+                        logger.info(f"History for '{child_name}' cleared successfully")
 
             self.send_response(302)
             self.send_header('Location', '/browsing_history')
             self.end_headers()
 
         elif self.path == '/toggle_encryption':
-            # מכיוון שתמיד צריך להיות מוצפן, אין טעם בפונקציה הזו
+            # Since encryption should always be on, this function is not needed
             logged_in_user = self.is_logged_in()
             if not logged_in_user:
                 self.send_response(302)
@@ -1530,20 +1916,23 @@ class ParentHandler(http.server.SimpleHTTPRequestHandler):
                 self.end_headers()
                 return
 
-            # הפניה לדף מצב המערכת
+            # Redirect to system status page
             self.send_response(302)
             self.send_header('Location', '/system_status')
             self.end_headers()
 
-        # יתר הפונקציות ממשיכות...
         else:
             self.send_response(404)
             self.end_headers()
 
 
-# פונקציות עזר נוספות לניהול המערכת
 def get_encryption_status():
-    """קבלת מצב ההצפנה הנוכחי"""
+    """
+    Get current encryption status.
+
+    Returns:
+        dict: Dictionary containing encryption status information
+    """
     return {
         "enabled": encryption_system is not None and file_manager is not None,
         "files": {
@@ -1556,7 +1945,12 @@ def get_encryption_status():
 
 
 def cleanup_old_files():
-    """ניקוי קבצים ישנים ואפיונים לא נחוצים"""
+    """
+    Clean up old files and unnecessary features.
+
+    Returns:
+        int: Number of files cleaned up
+    """
     old_files = [
         'browsing_history_backup.json',
         'children_data_backup.json',
@@ -1569,17 +1963,22 @@ def cleanup_old_files():
             try:
                 os.remove(file)
                 cleaned += 1
-                print(f"[CLEANUP] 🗑️ נמחק קובץ ישן: {file}")
+                logger.info(f"Deleted old file: {file}")
             except Exception as e:
-                print(f"[CLEANUP] ❌ לא ניתן למחוק {file}: {e}")
+                logger.error(f"Cannot delete {file}: {e}")
 
     if cleaned > 0:
-        print(f"[CLEANUP] ✅ נוקו {cleaned} קבצים ישנים")
+        logger.info(f"Cleaned {cleaned} old files")
     return cleaned
 
 
 def backup_all_data():
-    """יצירת גיבוי מלא של כל הנתונים"""
+    """
+    Create full backup of all data.
+
+    Returns:
+        str or None: Backup directory name if successful, None if failed
+    """
     import datetime
     import shutil
 
@@ -1606,19 +2005,24 @@ def backup_all_data():
                     shutil.copy2(file, os.path.join(backup_dir, file))
                     backed_up += 1
                 except Exception as e:
-                    print(f"[BACKUP] ❌ לא ניתן לגבות {file}: {e}")
+                    logger.error(f"Cannot backup {file}: {e}")
 
-        print(f"[BACKUP] ✅ נוצר גיבוי עם {backed_up} קבצים ב-{backup_dir}")
+        logger.info(f"Backup created with {backed_up} files in {backup_dir}")
         return backup_dir
 
     except Exception as e:
-        print(f"[BACKUP] ❌ שגיאה ביצירת גיבוי: {e}")
+        logger.error(f"Error creating backup: {e}")
         return None
 
 
 def final_check():
-    """בדיקה סופית שהכל מוכן"""
-    print("\n🔍 בדיקה סופית של המערכת...")
+    """
+    Final check that everything is ready.
+
+    Returns:
+        bool: True if system is ready, False if missing components
+    """
+    logger.info("Final system check...")
 
     required_files = [
         'encryption_module.py',
@@ -1633,137 +2037,138 @@ def final_check():
             missing_files.append(file)
 
     if missing_files:
-        print(f"❌ חסרים קבצים: {missing_files}")
-        print("⚠️  המערכת עלולה לא לעבוד ללא קבצים אלה")
+        logger.error(f"Missing files: {missing_files}")
+        logger.warning("System may not work without these files")
         return False
 
-    print("✅ כל הקבצים הנדרשים במקום")
+    logger.info("All required files in place")
 
-    # בדיקת הרשאות
+    # Check permissions
     try:
         test_file = "test_permissions.tmp"
         with open(test_file, 'w') as f:
             f.write("test")
         os.remove(test_file)
-        print("✅ הרשאות כתיבה תקינות")
+        logger.info("Write permissions OK")
     except Exception as e:
-        print(f"⚠️  בעיית הרשאות: {e}")
+        logger.warning(f"Permission issue: {e}")
 
-    print("✅ מוכן להפעלה!")
+    logger.info("Ready for launch!")
 
-    print("""
-🎯 להפעלה:
+    logger.info("""
+To run:
 1. python parent_server.py
-2. גש ל-https://localhost:8443
-3. התחבר עם: admin@example.com / admin123
-4. עבור למצב המערכת: /system_status
+2. Go to https://localhost:8443
+3. Login with: admin@example.com / admin123
+4. Go to system status: /system_status
 """)
     return True
 
 
-print("[*] ParentServer אותחל עם פונקציות ניהול ילדים והיסטוריית גלישה")
-print("[*] 🔒 מערכת הצפנה מתקדמת מוכנה")
+logger.info("ParentServer initialized with child management and browsing history functions")
+logger.info("Advanced encryption system ready")
 
-# יצירת מנהל משתמשים גלובלי
+# Create global user manager
 user_manager = UserManager()
 
 if __name__ == "__main__":
-    print("🚀 מתחיל שרת בקרת הורים מוצפן...")
+    logger.info("Starting encrypted parental control server...")
     print("=" * 50)
 
-    # אתחול מערכת ההצפנה המסונכרנת
     initialize_encryption()
 
-    # יצירת שרת ההורים
-    parent_server = ParentServer()
-
-    print("[🔒] מערכת הצפנה מסונכרנת מוכנה!")
-    print(f"[👥] {len(user_manager.users)} משתמשים רשומים")
-    print(f"[👶] {len(children_data)} ילדים במערכת")
-    print("[📡] תקשורת מוצפנת עם הילדים")
-
     try:
-        print("\n[*] 🔒 מתחיל שרת בקרת הורים עם HTTPS")
+        parent_server = ParentServer()
+        if not parent_server.start():  # משתמש בBaseManager.start()
+            raise Exception("Failed to start parent server")
+
+        logger.info("Server initialized successfully!")
+
+        logger.info("Synchronized encryption system ready!")
+        logger.info(f"{len(user_manager.users)} users registered")
+        logger.info(f"{len(children_data)} children in system")
+        logger.info("Encrypted communication with children")
+        logger.info("Starting encrypted parental control server with HTTPS")
         parent_server.start_communication_server()
 
-        # יצירת תעודת SSL
+        # Create SSL certificate
         if create_ssl_certificate():
-            print("[*] ✅ מפעיל שרת HTTPS מוצפן")
+            logger.info("Starting encrypted HTTPS server")
 
             with socketserver.TCPServer(("", HTTPS_PORT), ParentHandler) as httpd:
                 try:
-                    # הגדרת SSL
+                    # SSL setup
                     context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
                     context.load_cert_chain('parent_cert.pem', 'parent_key.pem')
 
-                    # הגדרות אבטחה חזקות
+                    # Strong security settings
                     context.set_ciphers('ECDHE+AESGCM:ECDHE+CHACHA20:DHE+AESGCM:!aNULL:!MD5:!DSS')
                     context.options |= ssl.OP_NO_SSLv2
                     context.options |= ssl.OP_NO_SSLv3
 
                     httpd.socket = context.wrap_socket(httpd.socket, server_side=True)
 
-                    print(f"\n🎉 השרת המוצפן מוכן!")
-                    print(f"[*] 🔒 שרת HTTPS פועל על https://localhost:{HTTPS_PORT}")
-                    print(f"[*] 📡 שרת תקשורת מוצפן פועל על פורט {COMMUNICATION_PORT}")
-                    print(f"[*] 🎯 מוכן לקבל חיבורים מוצפנים מילדים")
+                    print(f"\nEncrypted server ready!")
+                    print(f"HTTPS server running on https://localhost:{HTTPS_PORT}")
+                    print(f"Encrypted communication server running on port {COMMUNICATION_PORT}")
+                    print(f"Ready to receive encrypted connections from children")
 
                     server_url = f"https://localhost:{HTTPS_PORT}"
-                    print(f"\n[*] 🌐 פותח דפדפן: {server_url}")
-                    print("[!] ⚠️  אם הדפדפן מתריע - לחץ 'Advanced' ← 'Proceed to localhost'")
+                    print(f"\nOpening browser: {server_url}")
+                    print("If browser warns - click 'Advanced' <- 'Proceed to localhost'")
                     print("\n" + "=" * 50)
-                    print("[*] 🔒 כל התקשורת והנתונים מוצפנים")
-                    print("[*] לחץ Ctrl+C לעצירת השרת")
+                    print("All communication and data encrypted")
+                    print("Press Ctrl+C to stop server")
                     print("=" * 50)
 
                     webbrowser.open(server_url)
                     httpd.serve_forever()
 
                 except ssl.SSLError as e:
-                    print(f"[!] ❌ שגיאת SSL: {e}")
+                    logger.error(f"SSL error: {e}")
                     raise
 
         else:
-            raise Exception("לא ניתן ליצור תעודת SSL")
+            raise Exception("Cannot create SSL certificate")
 
     except KeyboardInterrupt:
-        print("\n[*] 🛑 עצירת השרת המוצפן על ידי המשתמש...")
+        logger.info("Encrypted server stopped by user...")
         parent_server.shutdown()
-        print("[*] ✅ השרת המוצפן נסגר בבטחה")
+        logger.info("Encrypted server closed safely")
 
     except Exception as e:
-        print(f"[!] ❌ שגיאה בהפעלת HTTPS: {e}")
+        logger.error(f"Error starting HTTPS: {e}")
         parent_server.shutdown()
-        print("[*] 🔄 עובר למצב HTTP כגיבוי...")
+        logger.info("Switching to HTTP backup mode...")
 
-        # גיבוי HTTP
+        # HTTP backup
         try:
             with socketserver.TCPServer(("", HTTP_PORT), ParentHandler) as httpd:
-                print(f"\n[*] 🔓 שרת HTTP פועל על http://localhost:{HTTP_PORT}")
-                print("[*] 👤 משתמש דמו: admin@example.com / admin123")
-                print("[*] ⚠️  במצב HTTP - אין הצפנת תעבורה!")
-                print("[*] 🔒 אבל הנתונים והתקשורת עדיין מוצפנים")
+                print(f"\nHTTP server running on http://localhost:{HTTP_PORT}")
+                print("Demo user: admin@example.com / admin123")
+                print("In HTTP mode - no traffic encryption!")
+                print("But data and communication still encrypted")
 
                 server_url = f"http://localhost:{HTTP_PORT}"
                 webbrowser.open(server_url)
-                print(f"[*] 🌐 דפדפן נפתח: {server_url}")
-                print("[*] לחץ Ctrl+C לעצירת השרת")
+                print(f"Browser opened: {server_url}")
+                print("Press Ctrl+C to stop server")
 
                 httpd.serve_forever()
 
         except KeyboardInterrupt:
-            print("\n[*] 🛑 עצירת שרת HTTP...")
+            logger.info("HTTP server stopped...")
             parent_server.shutdown()
-            print("[*] ✅ השרת נסגר בבטחה")
+            logger.info("Server closed safely")
 
         except Exception as http_error:
-            print(f"[!] ❌ שגיאה גם בשרת HTTP: {http_error}")
-            parent_server.shutdown()
+            logger.error(f"Error with HTTP server too: {http_error}")
+            parent_server.stop()
 
         finally:
             try:
                 parent_server.shutdown()
-                print("[*] 🔒 נתונים מוצפנים נשמרו")
-                print("[*] 👋 להתראות!")
+                logger.info("Encrypted data saved")
+                logger.info("Goodbye!")
             except:
                 pass
