@@ -1,15 +1,31 @@
+import logging
 from collections import defaultdict
 from datetime import datetime, timedelta
 
+# Configure logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
+
 
 def is_obviously_technical(domain):
-    """בודק אם הדומיין הוא טכני ולא מעניין להורים"""
-    if not domain or domain == 'לא ידוע':
+    """
+    Check if domain is technical and not interesting to parents.
+
+    Analyzes domain patterns to identify technical, tracking, advertising,
+    and other automated traffic that should be filtered from browsing history.
+
+    Args:
+        domain (str): Domain name to analyze
+
+    Returns:
+        bool: True if domain appears to be technical/automated, False otherwise
+    """
+    if not domain or domain == 'unknown':
         return True
 
     domain_lower = domain.lower()
 
-    # דומיינים טכניים ספציפיים - הרחבה של הרשימה
+    # Specific technical domains - expanded list
     technical_patterns = [
         'analytics', 'tracking', 'doubleclick', 'googletagmanager',
         'cdn.', 'cache.', 'static.', 'assets.', 'edge.', 'akamai', 'cloudflare',
@@ -19,7 +35,7 @@ def is_obviously_technical(domain):
         'connect.facebook.net', 'platform.twitter.com',
         'pixel.', 'clienttoken', 'spclient', 'apresolve',
         'dealer', 'pdata', 'lh3.googleusercontent',
-        # דומיינים טכניים נוספים שהופיעו אצלך:
+        # Additional technical domains that appeared in usage:
         'fastly-insights.com', 'contentsquare.net', 'casalemedia.com',
         'demdex.net', 'scorecardresearch.com', 'sentry.io',
         'googleoptimize.com', 'clarity.ms', 'optimizely.com',
@@ -30,7 +46,7 @@ def is_obviously_technical(domain):
         if pattern in domain_lower:
             return True
 
-    # דומיינים להסרה מוחלטת (Google + Microsoft ברקע)
+    # Domains for complete removal (Google + Microsoft background traffic)
     unwanted_domains = [
         'google.com', 'google.co.il', 'google.net', 'googleapis.com',
         'microsoft.com', 'live.com', 'outlook.com', 'office.com'
@@ -40,7 +56,7 @@ def is_obviously_technical(domain):
         if unwanted in domain_lower:
             return True
 
-    # שאר הבדיקות הקיימות...
+    # Additional existing checks...
     parts = domain_lower.split('.')
     if len(parts) > 5:
         return True
@@ -51,7 +67,21 @@ def is_obviously_technical(domain):
 
     return False
 
+
 def group_browsing_by_main_site(history_entries, time_window_minutes=30):
+    """
+    Group browsing history by main site with time window deduplication.
+
+    Groups browsing history entries by site and time to reduce noise and
+    provide a cleaner view of actual browsing activity.
+
+    Args:
+        history_entries (list): List of browsing history entries
+        time_window_minutes (int): Time window in minutes for grouping
+
+    Returns:
+        list: Filtered and grouped history entries
+    """
     sorted_entries = sorted(history_entries,
                             key=lambda x: x.get('timestamp', ''),
                             reverse=True)
@@ -59,22 +89,21 @@ def group_browsing_by_main_site(history_entries, time_window_minutes=30):
     result = []
 
     for entry in sorted_entries:
-        display_name = entry.get('display_name', 'לא ידוע')
+        display_name = entry.get('display_name', 'unknown')
         timestamp = entry.get('timestamp', '')
 
-        # יצירת מפתח ייחודי: שם + זמן (בדקות)
+        # Create unique key: name + time (in minutes)
         try:
             if 'T' in timestamp:
-                from datetime import datetime
                 dt = datetime.fromisoformat(timestamp.replace('Z', '+00:00'))
-                time_key = dt.strftime('%H:%M')  # שעה:דקה
+                time_key = dt.strftime('%H:%M')  # hour:minute
                 site_key = f"{display_name}_{time_key}"
             else:
                 site_key = display_name
         except:
             site_key = display_name
 
-        # הוסף רק אם לא ראינו את האתר באותה דקה
+        # Add only if we haven't seen this site in this minute
         if site_key not in seen_sites:
             seen_sites.add(site_key)
             result.append(entry)
@@ -83,43 +112,53 @@ def group_browsing_by_main_site(history_entries, time_window_minutes=30):
 
 
 def format_simple_grouped_entry(entry):
-    """עיצוב רשומה מקובצת פשוטה - תואם לאחור עם נתונים ישנים"""
+    """
+    Format grouped entry simply - backward compatible with old data.
 
-    # נסה כל האפשרויות למצוא את הדומיין
+    Formats browsing history entries for display with proper fallbacks
+    for missing fields and consistent styling across different data formats.
+
+    Args:
+        entry (dict): Browsing history entry to format
+
+    Returns:
+        str: HTML formatted entry for display
+    """
+    # Try all possibilities to find the domain
     original_domain = (entry.get('original_domain') or
                        entry.get('domain') or
                        entry.get('main_domain') or
-                       'לא ידוע')
+                       'unknown')
 
     main_domain = entry.get('main_domain', original_domain)
     display_name = entry.get('display_name')
 
-    # אם אין display_name, ננסה ליצור אחד מהדומיין
-    if not display_name or display_name == 'לא ידוע':
-        if original_domain and original_domain != 'לא ידוע':
-            # פונקציה פשוטה לחילוץ שם אתר
+    # If no display_name, try to create one from domain
+    if not display_name or display_name == 'unknown':
+        if original_domain and original_domain != 'unknown':
+            # Simple function to extract site name
             clean_domain = original_domain.lower().replace('www.', '').replace('m.', '')
             domain_parts = clean_domain.split('.')
             if len(domain_parts) >= 2:
                 site_name = domain_parts[0]
-                # שיפור התצוגה
+                # Improve display
                 if len(site_name) <= 3:
-                    display_name = site_name.upper()  # אתרים קצרים
+                    display_name = site_name.upper()  # Short sites
                 else:
-                    display_name = site_name.capitalize()  # אתרים ארוכים
+                    display_name = site_name.capitalize()  # Long sites
             else:
                 display_name = original_domain
         else:
-            display_name = "אתר לא ידוע"
+            display_name = "Unknown Site"
 
-    timestamp = entry.get('timestamp', 'לא ידוע')
+    timestamp = entry.get('timestamp', 'unknown')
     was_blocked = entry.get('was_blocked', False)
-    child_name = entry.get('child_name', 'לא ידוע')
+    child_name = entry.get('child_name', 'unknown')
 
     is_grouped = entry.get('is_grouped', False)
     status_description = entry.get('status_description', '')
 
-    # עיצוב התאריך
+    # Format date
     try:
         if 'T' in timestamp:
             dt = datetime.fromisoformat(timestamp.replace('Z', '+00:00'))
@@ -129,13 +168,13 @@ def format_simple_grouped_entry(entry):
     except:
         formatted_time = timestamp
 
-    # עיצוב טווח זמנים אם זה קיבוץ
+    # Format time range if it's a group
     if is_grouped and 'time_range' in entry:
         try:
             start_time = datetime.fromisoformat(entry['time_range']['start'].replace('Z', '+00:00'))
             end_time = datetime.fromisoformat(entry['time_range']['end'].replace('Z', '+00:00'))
 
-            # אם זה באותו היום - נציג רק טווח שעות
+            # If same day - show only hour range
             if start_time.date() == end_time.date():
                 time_display = f"{start_time.strftime('%H:%M')}-{end_time.strftime('%H:%M')}"
             else:
@@ -147,68 +186,68 @@ def format_simple_grouped_entry(entry):
 
     status_class = 'status-blocked' if was_blocked else 'status-allowed'
 
-    # תיאור הסטטוס - פשוט
-    if is_grouped and status_description and 'חסום' in status_description:
-        status_text = 'חסום'  # אם יש חסימות בקיבוץ - נראה "חסום"
+    # Status description - simple
+    if is_grouped and status_description and 'blocked' in status_description.lower():
+        status_text = 'Blocked'  # If there are blocks in group - show "Blocked"
     else:
-        status_text = 'חסום' if was_blocked else 'מותר'
+        status_text = 'Blocked' if was_blocked else 'Allowed'
 
-    # בניית HTML פשוט
+    # Build simple HTML
     domain_html = f'<span title="{original_domain}" class="site-name">{display_name}</span>'
 
-    # הוספת הדומיין הראשי אם שונה (אבל ללא מספר ביקורים)
+    # Add main domain if different (but without visit count)
     if main_domain != original_domain and main_domain:
         domain_html += f'<br><small class="main-domain">({main_domain})</small>'
 
     return f'''
-        <div class="history-item {'grouped-item' if is_grouped else ''}">
-            <div class="domain-info">
-                <div class="domain-name">{domain_html}</div>
-                <div class="domain-time">{time_display} • {child_name}</div>
-            </div>
-            <div class="status-badge {status_class}">{status_text}</div>
-        </div>
-    '''
+       <div class="history-item {'grouped-item' if is_grouped else ''}">
+           <div class="domain-info">
+               <div class="domain-name">{domain_html}</div>
+               <div class="domain-time">{time_display} • {child_name}</div>
+           </div>
+           <div class="status-badge {status_class}">{status_text}</div>
+       </div>
+   '''
 
 
-# CSS נוסף לקיבוץ (כבר מוגדר בתבנית, אבל כאן לעיון)
-grouping_css = """
+# Additional CSS for grouping (already defined in template, but here for reference)
+GROUPING_CSS = """
 .grouped-item {
-    background: #f8f9fa;
-    border-left: 4px solid #4a6fa5;
+   background: #f8f9fa;
+   border-left: 4px solid #4a6fa5;
 }
 
 .activity-badge {
-    background: #17a2b8;
-    color: white;
-    padding: 2px 6px;
-    border-radius: 10px;
-    font-size: 11px;
-    font-weight: bold;
+   background: #17a2b8;
+   color: white;
+   padding: 2px 6px;
+   border-radius: 10px;
+   font-size: 11px;
+   font-weight: bold;
 }
 
 .grouped-item .status-badge {
-    min-width: 120px;
-    font-size: 11px;
+   min-width: 120px;
+   font-size: 11px;
 }
 
 .site-name {
-    font-weight: bold;
-    font-size: 16px;
-    color: #333;
+   font-weight: bold;
+   font-size: 16px;
+   color: #333;
 }
 
 .main-domain {
-    color: #666;
-    font-style: italic;
-    font-size: 12px;
+   color: #666;
+   font-style: italic;
+   font-size: 12px;
 }
 
 .domain-name {
-    line-height: 1.4;
+   line-height: 1.4;
 }
 
 .history-item:hover .site-name {
-    color: #4a6fa5;
+   color: #4a6fa5;
 }
 """

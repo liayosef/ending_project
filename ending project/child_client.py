@@ -1,3 +1,5 @@
+import logging
+import sys
 from scapy.all import *
 from scapy.layers.dns import DNS, DNSQR, DNSRR
 import json
@@ -15,7 +17,6 @@ import ctypes
 from protocol import Protocol, COMMUNICATION_PORT
 import socket
 from datetime import datetime
-import sys
 import webbrowser
 from html_templats_child import (
     REGISTRATION_HTML_TEMPLATE,
@@ -25,19 +26,29 @@ from html_templats_child import (
 )
 from custom_http_server import ParentalControlHTTPServer
 
-# 🆕 Import עבור שרת HTTPS
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler('parental_control_child.log'),
+        logging.StreamHandler(sys.stdout)
+    ]
+)
+logger = logging.getLogger(__name__)
+
+# HTTPS Import for secure blocking
 try:
     from custom_https_server import HTTPSBlockServer
 
     HTTPS_AVAILABLE = True
-    print("[*] ✅ מודול HTTPS זמין")
+    logger.info("HTTPS module available")
 except ImportError:
     HTTPSBlockServer = None
     HTTPS_AVAILABLE = False
-    print("[*] ⚠️ מודול HTTPS לא זמין - רק HTTP")
+    logger.warning("HTTPS module not available - HTTP only")
 
-
-# 🆕 הפונקציה שחסרה
+# Configuration Constants
 REGISTRATION_FILE = "child_registration.json"
 REGISTRATION_CHECK_INTERVAL = 30
 CHILD_NAME = None
@@ -53,15 +64,16 @@ custom_http_server = None
 browsing_history = []
 history_lock = threading.Lock()
 MAX_HISTORY_ENTRIES = 1000
-REGISTRATION_PORT = 80      # דף רישום
-BLOCK_PORT = 8080          # דפי חסימה
+REGISTRATION_PORT = 80  # Registration page port
+BLOCK_PORT = 8080  # Block pages port
 HTTPS_BLOCK_PORT = 8443
 
-# מעקב אחר ביקורים בחלון זמן
+# Domain visit tracking within time window
 domain_visits = defaultdict(list)
 domain_visits_lock = threading.Lock()
 MAIN_SITE_WINDOW_SECONDS = 30
 
+# Technical patterns for filtering non-essential domains
 OBVIOUS_TECHNICAL_PATTERNS = [
     'analytics', 'tracking', 'ads', 'doubleclick', 'googletagmanager',
     'cdn', 'cache', 'static', 'assets', 'edge', 'akamai', 'cloudflare',
@@ -70,38 +82,56 @@ OBVIOUS_TECHNICAL_PATTERNS = [
     'heyday', 'jquery.com', 'rss.app', 'gostreaming.tv',
 ]
 
+
 def graceful_shutdown():
-    print("\n🔄 מתחיל סגירה נקייה...")
+    """
+    Performs graceful shutdown of all system components.
+    Restores original DNS settings and closes network connections.
+    """
+    logger.info("Starting graceful shutdown...")
     try:
-        print("[*] סוגר חיבורי רשת...")
+        logger.info("Closing network connections...")
         network_manager.cleanup_all()
 
-        print("[*] משחזר הגדרות DNS מקוריות...")
+        logger.info("Restoring original DNS settings...")
         if dns_manager.restore_original_dns():
-            print("[+] ✅ DNS שוחזר בהצלחה")
+            logger.info("DNS restored successfully")
         else:
-            print("[!] ❌ כישלון בשחזור DNS")
+            logger.error("Failed to restore DNS")
     except Exception as e:
-        print(f"[!] שגיאה בסגירה: {e}")
+        logger.error(f"Error during shutdown: {e}")
 
 
 def emergency_dns_cleanup():
-    print("\n[!] 🚨 ניקוי DNS חירום...")
+    """
+    Emergency DNS cleanup function called at program exit.
+    Attempts to restore DHCP DNS settings if normal cleanup fails.
+    """
+    logger.warning("Emergency DNS cleanup...")
     try:
-        # חזרה ל-DHCP
+        # Restore to DHCP
         subprocess.run(['netsh', 'interface', 'ip', 'set', 'dns', 'Wi-Fi', 'dhcp'],
                        capture_output=True, timeout=5)
-        print("[!] ✅ DNS הוחזר!")
-    except:
-        pass
+        logger.info("DNS restored to DHCP")
+    except Exception as e:
+        logger.error(f"Emergency DNS cleanup failed: {e}")
 
 
 atexit.register(emergency_dns_cleanup)
 
 
 def verify_child_with_parent_callback(child_name):
-    """פונקציית callback לשרת HTTP"""
+    """
+    Callback function for HTTP server to verify child with parent.
+
+    Args:
+        child_name (str): Name of the child to verify
+
+    Returns:
+        bool: True if verification successful, False otherwise
+    """
     try:
+        logger.info(f"Verifying child: {child_name}")
         success = verify_child_with_parent(child_name)
         if success:
             global CHILD_NAME
@@ -110,97 +140,122 @@ def verify_child_with_parent_callback(child_name):
             if custom_http_server and hasattr(custom_http_server, 'set_child_data'):
                 custom_http_server.set_child_data(child_name)
             child_client.child_name = CHILD_NAME
+            logger.info(f"Child verification successful: {child_name}")
         return success
     except Exception as e:
-        print(f"[!] שגיאה באימות: {e}")
+        logger.error(f"Error in child verification: {e}")
         return False
 
 
 class NetworkManager:
-    """מחלקה לניהול יעיל של סוקטים - מונעת דליפות"""
+    """
+    Efficient socket management class - prevents socket leaks.
+    Manages DNS query sockets, parent server communication, and connection pooling.
+    """
 
     def __init__(self):
-        # סוקט קבוע לשאילתות DNS
+        # Fixed socket for DNS queries
         self._dns_query_socket = None
         self._dns_socket_lock = threading.Lock()
 
-        # Pool של סוקטים לתקשורת עם שרת הורים
+        # Socket pool for parent server communication
         self._parent_socket_pool = []
         self._pool_lock = threading.Lock()
         self._max_pool_size = 5
 
-        # סוקט קבוע לתקשורת ארוכת טווח
+        # Fixed socket for long-term communication
         self._persistent_parent_socket = None
         self._persistent_socket_lock = threading.Lock()
 
+        logger.info("NetworkManager initialized")
+
     def get_dns_query_socket(self):
-        """מחזיר סוקט UDP לשאילתות DNS - יוצר רק פעם אחת"""
+        """
+        Returns UDP socket for DNS queries - creates only once.
+
+        Returns:
+            socket.socket: UDP socket for DNS queries
+        """
         with self._dns_socket_lock:
             if self._dns_query_socket is None:
                 self._dns_query_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
                 self._dns_query_socket.settimeout(5)
-                print("[NETWORK] יצרתי סוקט DNS קבוע")
+                logger.debug("Created fixed DNS socket")
             return self._dns_query_socket
 
     @contextmanager
     def get_parent_socket_from_pool(self):
-        """Context manager לסוקט זמני לשרת הורים - גרסה מתוקנת"""
+        """
+        Context manager for temporary socket to parent server - improved version.
+        Always creates new socket for simplicity and safety.
+
+        Yields:
+            socket.socket: TCP socket for parent server communication
+        """
         sock = None
         try:
-            # תמיד יוצר סוקט חדש - פשוט יותר ובטוח יותר
+            # Always create new socket - simpler and safer
             sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             sock.settimeout(10)
-            print("[NETWORK] ✅ יצרתי סוקט חדש (לא pool)")
+            logger.debug("Created new socket (not pooled)")
 
             yield sock
 
         except Exception as e:
-            print(f"[NETWORK] ❌ שגיאה בסוקט: {e}")
+            logger.error(f"Socket error: {e}")
             raise
         finally:
-            # תמיד סוגר את הסוקט - אין pool!
+            # Always close socket - no pooling!
             if sock:
                 try:
                     sock.close()
-                    print("[NETWORK] 🗑️ סוקט נסגר")
+                    logger.debug("Socket closed")
                 except:
                     pass
 
     def get_persistent_parent_socket(self):
-        """סוקט קבוע לתקשורת ארוכת טווח עם שרת הורים"""
+        """
+        Fixed socket for long-term communication with parent server.
+
+        Returns:
+            socket.socket: Persistent TCP socket for parent communication
+        """
         with self._persistent_socket_lock:
             if self._persistent_parent_socket is None:
                 self._persistent_parent_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                print("[NETWORK] יצרתי סוקט קבוע לשרת הורים")
+                logger.debug("Created persistent socket for parent server")
             return self._persistent_parent_socket
 
     def close_persistent_socket(self):
-        """סגירת הסוקט הקבוע"""
+        """Closes the persistent socket"""
         with self._persistent_socket_lock:
             if self._persistent_parent_socket:
                 try:
                     self._persistent_parent_socket.shutdown(socket.SHUT_RDWR)
                     self._persistent_parent_socket.close()
-                    print("[NETWORK] ✅ סגרתי סוקט קבוע")
+                    logger.debug("Closed persistent socket")
                 except:
                     pass
                 self._persistent_parent_socket = None
 
     def cleanup_all(self):
-        """ניקוי כל הסוקטים - לקריאה בסוף התוכנית"""
-        print("[NETWORK] 🧹 מנקה את כל הסוקטים...")
+        """
+        Cleanup all sockets - called at program end.
+        Properly closes all network resources.
+        """
+        logger.info("Cleaning up all sockets...")
 
-        # סגירת סוקט DNS
+        # Close DNS socket
         with self._dns_socket_lock:
             if self._dns_query_socket:
                 try:
                     self._dns_query_socket.close()
-                    print("[NETWORK] ✅ סוקט DNS נסגר")
+                    logger.debug("DNS socket closed")
                 except:
                     pass
                 self._dns_query_socket = None
 
-        # סגירת pool
+        # Close pool
         with self._pool_lock:
             for sock in self._parent_socket_pool:
                 try:
@@ -209,31 +264,51 @@ class NetworkManager:
                     pass
             cleared_count = len(self._parent_socket_pool)
             self._parent_socket_pool.clear()
-            print(f"[NETWORK] ✅ Pool נוקה ({cleared_count} סוקטים)")
+            logger.debug(f"Pool cleared ({cleared_count} sockets)")
 
-        # סגירת סוקט קבוע
+        # Close persistent socket
         self.close_persistent_socket()
 
-        print("[NETWORK] 🎉 כל הסוקטים נוקו!")
+        logger.info("All sockets cleaned up")
 
 
-# אובייקט גלובלי
+# Global network manager instance
 network_manager = NetworkManager()
 
 
 def load_registration():
+    """
+    Load child registration data from file.
+
+    Returns:
+        tuple: (child_name, is_registered) or (None, False) if not found
+    """
     try:
         with open(REGISTRATION_FILE, 'r', encoding='utf-8') as f:
             data = json.load(f)
-            return data.get('child_name'), data.get('is_registered', False)
+            child_name = data.get('child_name')
+            is_registered = data.get('is_registered', False)
+            logger.info(f"Loaded registration: {child_name}, registered: {is_registered}")
+            return child_name, is_registered
     except FileNotFoundError:
+        logger.debug("Registration file not found")
         return None, False
     except Exception as e:
-        print(f"[!] שגיאה בטעינת רישום: {e}")
+        logger.error(f"Error loading registration: {e}")
         return None, False
 
 
 def save_registration(child_name, is_registered=True):
+    """
+    Save child registration data to file.
+
+    Args:
+        child_name (str): Name of the child
+        is_registered (bool): Registration status
+
+    Returns:
+        bool: True if saved successfully, False otherwise
+    """
     try:
         data = {
             'child_name': child_name,
@@ -242,35 +317,50 @@ def save_registration(child_name, is_registered=True):
         }
         with open(REGISTRATION_FILE, 'w', encoding='utf-8') as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
-        print(f"[+] ✅ רישום נשמר: {child_name}")
+        logger.info(f"Registration saved: {child_name}")
         return True
     except Exception as e:
-        print(f"[!] שגיאה בשמירת רישום: {e}")
+        logger.error(f"Error saving registration: {e}")
         return False
 
 
 def check_child_registration():
+    """
+    Check if child is already registered and verify with parent server.
+
+    Returns:
+        bool: True if child is registered and verified, False otherwise
+    """
     global CHILD_NAME
     saved_name, is_registered = load_registration()
 
     if saved_name and is_registered:
         if verify_child_with_parent(saved_name):
             CHILD_NAME = saved_name
-            print(f"[+]  ילד רשום: {CHILD_NAME}")
+            logger.info(f"Registered child found: {CHILD_NAME}")
             return True
         else:
-            print(f"[!] רישום של '{saved_name}' לא תקף יותר")
+            logger.warning(f"Registration for '{saved_name}' is no longer valid")
             try:
                 os.remove(REGISTRATION_FILE)
+                logger.info("Removed invalid registration file")
             except:
                 pass
     return False
 
 
 def verify_child_with_parent(child_name):
-    """גרסה משופרת שמשתמשת ב-NetworkManager"""
+    """
+    Enhanced version using NetworkManager to verify child with parent server.
+
+    Args:
+        child_name (str): Name of child to verify
+
+    Returns:
+        bool: True if child is verified by parent, False otherwise
+    """
     try:
-        print(f"[DEBUG] מנסה לאמת ילד: {child_name}")
+        logger.debug(f"Attempting to verify child: {child_name}")
 
         with network_manager.get_parent_socket_from_pool() as sock:
             sock.connect((PARENT_SERVER_IP, COMMUNICATION_PORT))
@@ -281,26 +371,33 @@ def verify_child_with_parent(child_name):
             msg_type, data = Protocol.receive_message(sock)
             is_valid = data.get("is_valid", False)
 
-            print(f"[DEBUG]  אימות הושלם")
+            logger.debug(f"Child verification completed: {is_valid}")
             return is_valid
 
     except Exception as e:
-        print(f"[!] שגיאה באימות: {e}")
+        logger.error(f"Error in child verification: {e}")
         return False
 
 
 def wait_for_registration():
-    print("\n🔧 מכין דף רישום...")
-    print("⏳ ממתין שהשרת יהיה מוכן...")
+    """
+    Wait for child registration through web interface.
+    Opens browser for registration and waits for completion.
 
-    time.sleep(3)  # זמן נוסף לשרת HTTPS
+    Returns:
+        bool: True if registration completed successfully, False if timeout
+    """
+    logger.info("Preparing registration page...")
+    logger.info("Waiting for server to be ready...")
 
-    # בדיקת מוכנות השרתים
+    time.sleep(3)  # Additional time for HTTPS server
+
+    # Check server readiness
     max_attempts = 15
     servers_ready = []
 
     for i in range(max_attempts):
-        # בדיקת שרת HTTP על פורט 80
+        # Check HTTP server on port 80
         try:
             test_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             test_sock.settimeout(0.5)
@@ -312,31 +409,31 @@ def wait_for_registration():
             pass
 
         if servers_ready:
-            print(f"[✅] שרתים מוכנים: {', '.join(servers_ready)}")
+            logger.info(f"Servers ready: {', '.join(servers_ready)}")
             break
 
-        print(f"[⏳] ממתין לשרתים... ({i + 1}/{max_attempts})")
+        logger.info(f"Waiting for servers... ({i + 1}/{max_attempts})")
         time.sleep(0.5)
 
-    # פתיחת דפדפן
+    # Open browser
     try:
         if servers_ready:
             if "HTTP:80" in servers_ready:
                 registration_url = "http://127.0.0.1"
             else:
                 registration_url = "http://127.0.0.1"
-                print("🌐 פותח דפדפן עם HTTP")
+                logger.info("Opening browser with HTTP")
 
-            print(f"🔗 כתובת: {registration_url}")
+            logger.info(f"URL: {registration_url}")
             webbrowser.open(registration_url)
-            print("📝 הזן את השם שלך בטופס שמופיע בדפדפן")
+            logger.info("Please enter your name in the form that appears in the browser")
         else:
-            print("[!] אף שרת לא הצליח להתחיל")
+            logger.error("No server could start")
             return False
     except Exception as e:
-        print(f"[!] שגיאה בפתיחת דפדפן: {e}")
+        logger.error(f"Error opening browser: {e}")
 
-    # המתנה לרישום
+    # Wait for registration
     max_wait = 300
     waited = 0
 
@@ -345,35 +442,43 @@ def wait_for_registration():
         waited += 5
 
         if waited % 30 == 0:
-            print(f"[*] ממתין לרישום... ({waited}/{max_wait} שניות)")
+            logger.info(f"Waiting for registration... ({waited}/{max_wait} seconds)")
             if servers_ready:
                 for server in servers_ready:
-                    print(f"[*] 🔗 נסה לגשת ל: http://127.0.0.1")
+                    logger.info(f"Try accessing: http://127.0.0.1")
 
     if CHILD_NAME:
-        print(f"\n🎉 רישום הושלם דרך הדפדפן!")
-        print(f"👶 שם: {CHILD_NAME}")
+        logger.info("Registration completed through browser!")
+        logger.info(f"Name: {CHILD_NAME}")
         return True
     else:
-        print("\n❌ תם הזמן לרישום")
+        logger.error("Registration timeout")
         return False
 
 
 def periodic_registration_check():
+    """
+    Periodic check to ensure child is still registered and connected.
+    Runs in background thread to monitor connection status.
+    """
     global CHILD_NAME
     while True:
         try:
             time.sleep(REGISTRATION_CHECK_INTERVAL)
             if CHILD_NAME:
                 if not child_client.connected:
-                    print(f"[!] הילד '{CHILD_NAME}' לא מחובר יותר!")
+                    logger.warning(f"Child '{CHILD_NAME}' is no longer connected!")
                     CHILD_NAME = None
                     block_all_internet()
         except Exception as e:
-            print(f"[!] שגיאה בבדיקה תקופתית: {e}")
+            logger.error(f"Error in periodic check: {e}")
 
 
 def block_all_internet():
+    """
+    Block all internet access by adding common domains to blocked list.
+    Used when child is not registered.
+    """
     global BLOCKED_DOMAINS
     common_domains = {
         "google.com", "youtube.com", "facebook.com", "instagram.com",
@@ -381,28 +486,35 @@ def block_all_internet():
         "microsoft.com", "apple.com", "yahoo.com", "bing.com"
     }
     BLOCKED_DOMAINS.update(common_domains)
-    print("[!]  אינטרנט חסום - ילד לא רשום!")
+    logger.warning("Internet blocked - child not registered!")
 
 
 def extract_main_site_name(domain):
     """
-    מחלץ את השם הראשי של האתר מכל דומיין
+    Extract the main site name from any domain.
+    Handles subdomains, technical prefixes, and international TLDs.
+
+    Args:
+        domain (str): Domain name to process
+
+    Returns:
+        str: Main domain name without technical subdomains
     """
     if not domain:
         return domain
 
-    # ניקוי הדומיין
+    # Clean the domain
     domain = domain.lower().strip()
 
-    # הסרת פרוטוקול אם קיים
+    # Remove protocol if present
     if '://' in domain:
         domain = urlparse(domain).netloc or domain
 
-    # הסרת פורט
+    # Remove port
     if ':' in domain:
         domain = domain.split(':')[0]
 
-    # הסרת תת-דומיינים טכניים נפוצים
+    # Remove common technical subdomains
     technical_subdomains = [
         'www', 'www2', 'www3', 'm', 'mobile', 'api', 'cdn', 'static',
         'assets', 'img', 'images', 'css', 'js', 'analytics', 'tracking',
@@ -412,64 +524,74 @@ def extract_main_site_name(domain):
 
     parts = domain.split('.')
 
-    # אם יש רק 2 חלקים (name.com) - זה הדומיין הראשי
+    # If only 2 parts (name.com) - this is the main domain
     if len(parts) <= 2:
         return domain
 
-    # הסרת תת-דומיינים טכניים
+    # Remove technical subdomains
     while len(parts) > 2 and parts[0] in technical_subdomains:
         parts = parts[1:]
 
-    # טיפול בדומיינים ישראליים ובינלאומיים
+    # Handle Israeli and international domains
     common_tlds = [
         'co.il', 'ac.il', 'gov.il', 'org.il', 'net.il',
         'com.au', 'co.uk', 'co.za', 'com.br'
     ]
 
-    # בדיקה אם יש TLD מורכב
+    # Check for compound TLD
     if len(parts) >= 3:
         last_two = '.'.join(parts[-2:])
         if last_two in common_tlds:
-            # TLD מורכב - נשמור 3 חלקים אחרונים
+            # Compound TLD - keep last 3 parts
             if len(parts) >= 3:
                 return '.'.join(parts[-3:])
 
-    # במקרה הרגיל - נשמור 2 חלקים אחרונים
+    # Normal case - keep last 2 parts
     return '.'.join(parts[-2:])
 
 
 def get_site_display_name(domain):
-    # בדיקה במיפוי הישראלי קודם
+    """
+    Get a user-friendly display name for a website.
+    Handles special cases and formatting for better readability.
+
+    Args:
+        domain (str): Domain name to process
+
+    Returns:
+        str: User-friendly site name
+    """
+    # Check Israeli mapping first
     if 'ebag.cet.ac.il' in domain:
-        return 'אופק על יסודי'
+        return 'Elementary Horizon'
     elif 'cet.ac.il' in domain and 'ebag' not in domain:
-        return 'מטח'
+        return 'CET Education'
     elif 'ynet.co.il' in domain:
         return 'Ynet'
     elif 'walla.co.il' in domain:
-        return 'וואלה'
+        return 'Walla'
     elif 'mako.co.il' in domain:
-        return 'מאקו'
+        return 'Mako'
 
     main_domain = extract_main_site_name(domain)
 
     if not main_domain:
         return domain
 
-    # חילוץ השם בלבד (ללא סיומת)
+    # Extract name only (without extension)
     parts = main_domain.split('.')
     if len(parts) >= 2:
-        site_name = parts[0]  # החלק הראשון
+        site_name = parts[0]  # First part
 
-        # שיפור התצוגה
+        # Improve display
         site_name = site_name.replace('-', ' ').replace('_', ' ')
 
-        # קפיטליזציה
+        # Capitalization
         if len(site_name) <= 3:
-            # אתרים קצרים - כל האותיות גדולות
+            # Short sites - all caps
             site_name = site_name.upper()
         else:
-            # אתרים ארוכים - רק האות הראשונה גדולה
+            # Long sites - only first letter caps
             site_name = site_name.capitalize()
 
         return site_name
@@ -479,11 +601,17 @@ def get_site_display_name(domain):
 
 def is_obviously_technical(domain):
     """
-    בודק אם הדומיין הוא טכני/פרסומי ולא מעניין להורים
+    Check if domain is technical/advertising and not interesting to parents.
+
+    Args:
+        domain (str): Domain to check
+
+    Returns:
+        bool: True if domain is obviously technical, False otherwise
     """
     domain_lower = domain.lower()
 
-    # דפוסים טכניים ברורים
+    # Clear technical patterns
     technical_patterns = [
         'analytics', 'tracking', 'ads', 'doubleclick', 'googletagmanager',
         'cdn', 'cache', 'static', 'assets', 'edge', 'akamai', 'cloudflare',
@@ -497,17 +625,17 @@ def is_obviously_technical(domain):
         if pattern in domain_lower:
             return True
 
-    # תת-דומיינים ארוכים מדי (סימן לטכני)
+    # Too many subdomains (sign of technical)
     parts = domain_lower.split('.')
-    if len(parts) > 4:  # יותר מדי תת-דומיינים
+    if len(parts) > 4:  # Too many subdomains
         return True
 
-    # בדיקת דומיינים קצרים מדי או ארוכים מדי
+    # Check domains too short or too long
     main_part = parts[0] if parts else ''
     if len(main_part) < 2 or len(main_part) > 20:
         return True
 
-    # דומיינים שהם רק מספרים או תווים מוזרים
+    # Domains that are only numbers or strange characters
     if re.match(r'^[0-9\-_]+$', main_part):
         return True
 
@@ -515,16 +643,22 @@ def is_obviously_technical(domain):
 
 
 def add_to_history(domain, timestamp, was_blocked=False):
-    """הוספת רשומה להיסטוריה - פשוט וללא סינון יתר"""
+    """
+    Add entry to browsing history - simple and without over-filtering.
 
-    # דילוג רק על דומיינים טכניים ברורים
+    Args:
+        domain (str): Domain that was accessed
+        timestamp (str): ISO format timestamp
+        was_blocked (bool): Whether the domain was blocked
+    """
+    # Skip only obviously technical domains
     if is_obviously_technical(domain):
         return
 
     if any(word in domain.lower() for word in ['beacon', 'analytics', 'tracking', 'telemetry']):
         return
 
-    # חילוץ שם האתר
+    # Extract site name
     main_domain = extract_main_site_name(domain)
     display_name = get_site_display_name(domain)
 
@@ -543,146 +677,169 @@ def add_to_history(domain, timestamp, was_blocked=False):
         if len(browsing_history) > MAX_HISTORY_ENTRIES:
             browsing_history.pop(0)
 
-        print(f"[HISTORY] ✅ נוסף: {display_name} ({main_domain}) ({'חסום' if was_blocked else 'מותר'})")
+        logger.debug(f"Added to history: {display_name} ({main_domain}) ({'blocked' if was_blocked else 'allowed'})")
 
 
 def send_history_update():
-    if hasattr(child_client, 'connected'):
-        print(f"[DEBUG] child_client.connected = {child_client.connected}")
-    print(f"[DEBUG] browsing_history length = {len(browsing_history)}")
-    print(f"[DEBUG] CHILD_NAME = {CHILD_NAME}")
+    """
+    Send browsing history update to parent server.
+    Only sends if child is connected and has history entries.
+    """
+    logger.debug(f"child_client.connected = {getattr(child_client, 'connected', 'Unknown')}")
+    logger.debug(f"browsing_history length = {len(browsing_history)}")
+    logger.debug(f"CHILD_NAME = {CHILD_NAME}")
 
     if hasattr(child_client, 'connected') and child_client.connected and browsing_history:
         try:
-            print(f"[DEBUG]  תנאים מתקיימים - שולח היסטוריה...")
+            logger.debug("Conditions met - sending history...")
             with history_lock:
                 recent_history = browsing_history.copy()
             data = {"child_name": CHILD_NAME, "history": recent_history}
-            print(f"[DEBUG] נתונים לשליחה: {len(recent_history)} רשומות")
+            logger.debug(f"Data to send: {len(recent_history)} entries")
 
             Protocol.send_message(child_client.sock, Protocol.BROWSING_HISTORY, data)
-            print(f"[HISTORY]  נשלח עדכון לשרת: {len(recent_history)} רשומות")
+            logger.info(f"History update sent to server: {len(recent_history)} entries")
         except Exception as e:
-            print(f"[!]  שגיאה בשליחת היסטוריה: {e}")
+            logger.error(f"Error sending history: {e}")
             import traceback
             traceback.print_exc()
     else:
-        print(f"[DEBUG]  תנאים לא מתקיימים:")
-        print(f"[DEBUG] - connected: {hasattr(child_client, 'connected') and child_client.connected}")
-        print(f"[DEBUG] - history: {len(browsing_history)} רשומות")
+        logger.debug("Conditions not met:")
+        logger.debug(f"- connected: {hasattr(child_client, 'connected') and child_client.connected}")
+        logger.debug(f"- history: {len(browsing_history)} entries")
 
 
 def clear_dns_cache():
-    print("[*] מנקה DNS cache...")
+    """
+    Clear Windows DNS cache to ensure fresh lookups.
+    """
+    logger.info("Clearing DNS cache...")
     try:
         result = subprocess.run(['ipconfig', '/flushdns'], capture_output=True, text=True, encoding='utf-8')
         if result.returncode == 0:
-            print("[+] Windows DNS cache נוקה")
+            logger.info("Windows DNS cache cleared")
         else:
-            print(f"[!] בעיה בניקוי cache: {result.stderr}")
+            logger.warning(f"Issue clearing cache: {result.stderr}")
     except Exception as e:
-        print(f"[!] שגיאה בניקוי cache: {e}")
+        logger.error(f"Error clearing cache: {e}")
 
 
 def start_block_server():
+    """
+    Start custom HTTP/HTTPS server for block pages and registration.
+
+    Returns:
+        int or None: Port number if server started successfully, None otherwise
+    """
     global BLOCK_SERVER_PORT, custom_http_server
 
-    print("[*] מפעיל שרת HTTP/HTTPS מותאם אישית...")
+    logger.info("Starting custom HTTP/HTTPS server...")
 
-    # 🆕 בדיקה מוקדמת של תעודות SSL
+    # Early SSL certificate check
     if HTTPS_AVAILABLE:
-        print("[*] בודק תעודות SSL...")
+        logger.info("Checking SSL certificates...")
         check_ssl_certificates()
 
     servers_started = []
 
-    # ניסיון הפעלת HTTPS על פורט 443
+    # Try starting HTTPS on port 443
     if HTTPS_AVAILABLE and HTTPSBlockServer is not None:
         try:
-            print("[*] 🔒 מנסה להפעיל שרת HTTPS על פורט 443...")
+            logger.info("Trying to start HTTPS server on port 443...")
 
             https_server = HTTPSBlockServer("127.0.0.1", 443, 8080)
 
-            # הגדרת התבניות
+            # Set templates
             https_server.set_templates(REGISTRATION_HTML_TEMPLATE, BLOCK_HTML_TEMPLATE)
             https_server.set_verify_callback(verify_child_with_parent_callback)
             https_server.set_external_functions(create_error_page, create_success_page)
 
-            # הפעלת השרת בthread נפרד
+            # Start server in separate thread
             https_thread = threading.Thread(target=https_server.start_server, daemon=True)
             https_thread.start()
 
-            time.sleep(3)  # 🆕 זמן נוסף לשרת HTTPS להתייצב
+            time.sleep(3)  # Additional time for HTTPS server to stabilize
 
-            # שמירה של שרת HTTPS כראשי
+            # Save HTTPS server as primary
             custom_http_server = https_server
             BLOCK_SERVER_PORT = 443
             servers_started.append("HTTPS:443")
-            print("[+] ✅ שרת HTTPS פועל על פורט 443")
+            logger.info("HTTPS server running on port 443")
 
         except Exception as e:
-            print(f"[!] שגיאה בהפעלת HTTPS על פורט 443: {e}")
+            logger.error(f"Error starting HTTPS on port 443: {e}")
             if "Permission denied" in str(e) or "WinError 10013" in str(e):
-                print("[!] ⚠️ נדרשות הרשאות מנהל לפורט 443")
-                print("[!] 💡 הרץ את התוכנית כמנהל (Run as Administrator)")
+                logger.warning("Administrator privileges required for port 443")
+                logger.info("Run the program as Administrator")
 
-    # הפעלת HTTP על פורט 80
+    # Start HTTP on port 80
     try:
-        print("[*] 🔓 מנסה להפעיל שרת HTTP על פורט 80...")
+        logger.info("Trying to start HTTP server on port 80...")
 
         http_server = ParentalControlHTTPServer("127.0.0.1", 80)
 
-        # הגדרת התבניות
+        # Set templates
         http_server.set_templates(REGISTRATION_HTML_TEMPLATE, BLOCK_HTML_TEMPLATE)
         http_server.set_verify_callback(verify_child_with_parent_callback)
         http_server.set_external_functions(create_error_page, create_success_page)
 
-        # הפעלת השרת בthread נפרד
+        # Start server in separate thread
         http_thread = threading.Thread(target=http_server.start_server, daemon=True)
         http_thread.start()
 
         time.sleep(1)
 
-        # אם HTTPS לא עבד, HTTP יהיה הראשי
+        # If HTTPS didn't work, HTTP will be primary
         if not custom_http_server:
             custom_http_server = http_server
             BLOCK_SERVER_PORT = 80
 
         servers_started.append("HTTP:80")
-        print("[+] ✅ שרת HTTP פועל על פורט 80")
+        logger.info("HTTP server running on port 80")
 
     except Exception as e:
-        print(f"[!] שגיאה בהפעלת HTTP על פורט 80: {e}")
+        logger.error(f"Error starting HTTP on port 80: {e}")
         if "Permission denied" in str(e) or "WinError 10013" in str(e):
-            print("[!] ⚠️ נדרשות הרשאות מנהל לפורט 80")
+            logger.warning("Administrator privileges required for port 80")
 
-    # בדיקה שלפחות שרת אחד עובד
+    # Check that at least one server is working
     if servers_started:
-        print(f"[+] 🎉 שרתי חסימה פעילים: {', '.join(servers_started)}")
+        logger.info(f"Block servers active: {', '.join(servers_started)}")
 
-        # הודעות חשובות למשתמש
+        # Important messages for user
         if "HTTPS:443" in servers_started:
-            print("")
-            print("🎯 אתרי HTTPS חסומים (Instagram, Facebook, וכו') יטופלו על ידי שרת HTTPS")
-            print("🔒 בפעם הראשונה הדפדפן יבקש אישור לתעודה - תאשר!")
+            logger.info("Blocked HTTPS sites (Instagram, Facebook, etc.) will be handled by HTTPS server")
+            logger.info("First time browser will ask for certificate approval - please approve!")
         if "HTTP:80" in servers_started:
-            print("🔓 אתרי HTTP חסומים יטופלו על ידי שרת HTTP רגיל")
+            logger.info("Blocked HTTP sites will be handled by regular HTTP server")
 
         return BLOCK_SERVER_PORT or 80
     else:
-        print("[!] ❌ כישלון בהפעלת כל השרתים")
-        print("[!] 💡 בדוק שהתוכנית רצה כמנהל (Run as Administrator)")
+        logger.error("Failed to start all servers")
+        logger.info("Check that the program runs as Administrator")
         BLOCK_SERVER_PORT = None
         return None
 
 
 class DNSManager:
+    """
+    DNS configuration manager for Windows systems.
+    Handles setting up DNS redirection and restoring original settings.
+    """
+
     def __init__(self):
         self.system = platform.system()
         self.original_dns = None
         self.interface_name = None
+        logger.info("DNSManager initialized")
 
     def is_admin(self):
+        """
+        Check if running with administrator privileges.
+
+        Returns:
+            bool: True if running as admin, False otherwise
+        """
         try:
             if self.system == "Windows":
                 return ctypes.windll.shell32.IsUserAnAdmin()
@@ -692,69 +849,99 @@ class DNSManager:
             return False
 
     def get_current_dns(self, interface_name):
-        """שמירת הגדרות DNS הנוכחיות"""
+        """
+        Save current DNS settings.
+
+        Args:
+            interface_name (str): Network interface name
+
+        Returns:
+            list: Current DNS servers or empty list
+        """
         try:
             cmd = ['powershell', '-Command',
                    f'Get-DnsClientServerAddress -InterfaceAlias "{interface_name}" | Select-Object -ExpandProperty ServerAddresses']
             result = subprocess.run(cmd, capture_output=True, text=True, encoding='utf-8')
             if result.returncode == 0 and result.stdout.strip():
                 dns_servers = [line.strip() for line in result.stdout.strip().split('\n') if line.strip()]
-                print(f"[*] DNS נוכחי: {dns_servers}")
+                logger.info(f"Current DNS: {dns_servers}")
                 return dns_servers
             else:
-                print("[*] אין DNS ספציפי מוגדר (אוטומטי)")
+                logger.info("No specific DNS configured (automatic)")
                 return []
         except Exception as e:
-            print(f"[!] שגיאה בקריאת DNS נוכחי: {e}")
+            logger.error(f"Error reading current DNS: {e}")
             return []
 
     def get_active_interface(self):
+        """
+        Find active network interface.
+
+        Returns:
+            str or None: Name of active network interface
+        """
         try:
             cmd = ['powershell', '-Command',
                    'Get-NetAdapter | Where-Object {$_.Status -eq "Up"} | Select-Object -First 1 -ExpandProperty Name']
             result = subprocess.run(cmd, capture_output=True, text=True, encoding='utf-8')
             if result.returncode == 0 and result.stdout.strip():
                 interface_name = result.stdout.strip()
-                print(f"[*] נמצא ממשק: {interface_name}")
+                logger.info(f"Found interface: {interface_name}")
                 return interface_name
         except Exception as e:
-            print(f"[!] שגיאה בחיפוש ממשק: {e}")
+            logger.error(f"Error finding interface: {e}")
 
-        # גיבוי - נסה שמות נפוצים
+        # Backup - try common names
         common_names = ['Wi-Fi', 'Ethernet', 'Local Area Connection']
         for name in common_names:
             try:
                 result = subprocess.run(['netsh', 'interface', 'ip', 'show', 'config', f'name={name}'],
                                         capture_output=True, text=True, encoding='utf-8')
                 if result.returncode == 0:
-                    print(f"[*] נמצא ממשק: {name}")
+                    logger.info(f"Found interface: {name}")
                     return name
             except:
                 continue
         return None
 
     def set_dns_windows(self, interface_name, dns_server):
+        """
+        Set DNS server on Windows interface.
+
+        Args:
+            interface_name (str): Network interface name
+            dns_server (str): DNS server IP address
+
+        Returns:
+            bool: True if DNS set successfully, False otherwise
+        """
         try:
-            print(f"[*] מנסה להגדיר DNS ל-{dns_server} בממשק '{interface_name}'")
+            logger.info(f"Trying to set DNS to {dns_server} on interface '{interface_name}'")
 
             cmd = ['powershell', '-Command',
                    f'Set-DnsClientServerAddress -InterfaceAlias "{interface_name}" -ServerAddresses "{dns_server}"']
             result = subprocess.run(cmd, capture_output=True, text=True, encoding='utf-8')
 
             if result.returncode == 0:
-                print(f"[+] DNS הוגדר בהצלחה ל-{dns_server}")
+                logger.info(f"DNS set successfully to {dns_server}")
                 return True
             else:
-                print(f"[!] שגיאה ב-PowerShell: {result.stderr}")
+                logger.error(f"PowerShell error: {result.stderr}")
                 return False
         except Exception as e:
-            print(f"[!] שגיאה בהגדרת DNS: {e}")
+            logger.error(f"Error setting DNS: {e}")
             return False
 
     def setup_dns_redirect(self):
+        """
+        Setup DNS redirection to local machine.
+
+        Returns:
+            bool: True if DNS redirect setup successfully, False otherwise
+        """
         if not self.is_admin():
-            print("[!] נדרשות הרשאות מנהל לשינוי הגדרות DNS")
-            print("[!] אנא הפעל את התוכנית כמנהל (Run as Administrator)")
+            logger.error("Administrator privileges required to change DNS settings")
+            logger.error("Please run the program as Administrator")
             return False
 
         if self.system == "Windows":
@@ -762,88 +949,113 @@ class DNSManager:
             if interface_name:
                 self.interface_name = interface_name
 
-                # ⚠️ חשוב! שמירת הגדרות DNS הנוכחיות לפני השינוי
+                # Important! Save current DNS settings before changing
                 current_dns = self.get_current_dns(interface_name)
                 self.original_dns = current_dns
 
-                print(f"[*] שומר DNS מקורי: {current_dns}")
+                logger.info(f"Saving original DNS: {current_dns}")
 
                 if self.set_dns_windows(interface_name, "127.0.0.1"):
-                    print("[+] DNS הוגדר בהצלחה למחשב המקומי")
+                    logger.info("DNS successfully set to local machine")
                     return True
             else:
-                print("[!] לא נמצא ממשק רשת פעיל")
+                logger.error("No active network interface found")
         else:
-            print("[!] מערכת הפעלה לא נתמכת כרגע (נתמך רק Windows)")
+            logger.error("Operating system not currently supported (Windows only)")
         return False
 
     def restore_original_dns(self):
-        """שחזור הגדרות DNS מקוריות"""
+        """
+        Restore original DNS settings.
+
+        Returns:
+            bool: True if DNS restored successfully, False otherwise
+        """
         if not self.interface_name:
-            print("[!] אין מידע על ממשק הרשת")
+            logger.error("No network interface information")
             return False
 
         if self.system == "Windows":
             try:
                 if self.original_dns and len(self.original_dns) > 0:
-                    # החזרת DNS ספציפי שהיה קיים
+                    # Restore specific DNS that existed
                     dns_list = ','.join(f'"{dns}"' for dns in self.original_dns)
                     cmd = ['powershell', '-Command',
                            f'Set-DnsClientServerAddress -InterfaceAlias "{self.interface_name}" -ServerAddresses {dns_list}']
-                    print(f"[*] מחזיר DNS ל: {self.original_dns}")
+                    logger.info(f"Restoring DNS to: {self.original_dns}")
                 else:
-                    # החזרה להגדרות אוטומטיות
+                    # Restore to automatic settings
                     cmd = ['powershell', '-Command',
                            f'Set-DnsClientServerAddress -InterfaceAlias "{self.interface_name}" -ResetServerAddresses']
-                    print(f"[*] מחזיר DNS להגדרות אוטומטיות")
+                    logger.info("Restoring DNS to automatic settings")
 
                 result = subprocess.run(cmd, capture_output=True, text=True, encoding='utf-8')
                 if result.returncode == 0:
-                    print(f"[+] ✅ DNS שוחזר בהצלחה בממשק {self.interface_name}")
+                    logger.info(f"DNS successfully restored on interface {self.interface_name}")
 
-                    # נקה cache של DNS
+                    # Clear DNS cache
                     clear_dns_cache()
                     return True
                 else:
-                    print(f"[!] שגיאה בשחזור DNS: {result.stderr}")
+                    logger.error(f"Error restoring DNS: {result.stderr}")
                     return False
             except Exception as e:
-                print(f"[!] שגיאה בשחזור DNS: {e}")
+                logger.error(f"Error restoring DNS: {e}")
                 return False
         return False
+
+
 def clear_dns_cache_when_updated():
-    """ניקוי DNS cache כשהרשימה החסומה משתנה"""
+    """
+    Clear DNS cache when blocked list is updated.
+    """
     try:
-        print("[*] 🧹 מנקה DNS cache אחרי עדכון...")
+        logger.info("Clearing DNS cache after update...")
         result = subprocess.run(['ipconfig', '/flushdns'],
-                               capture_output=True, text=True, encoding='utf-8')
+                                capture_output=True, text=True, encoding='utf-8')
         if result.returncode == 0:
-            print("[+] ✅ DNS cache נוקה")
+            logger.info("DNS cache cleared")
         else:
-            print(f"[!] בעיה בניקוי cache: {result.stderr}")
+            logger.warning(f"Issue clearing cache: {result.stderr}")
     except Exception as e:
-        print(f"[!] שגיאה בניקוי cache: {e}")
+        logger.error(f"Error clearing cache: {e}")
 
 
 class ChildClient:
+    """
+    Client for communication with parent server.
+    Handles registration, domain updates, and status reporting.
+    """
+
     def __init__(self):
         self.child_name = CHILD_NAME
         self.connected = False
         self.keep_running = True
         self.connection_event = threading.Event()
         self._main_socket = None
+        logger.info("ChildClient initialized")
 
     @property
     def sock(self):
+        """
+        Get the main communication socket.
+
+        Returns:
+            socket.socket: Main socket for parent communication
+        """
         return self._main_socket
 
     def connect_to_parent(self):
+        """
+        Connect to parent server with retry logic.
+        Attempts multiple connections before giving up.
+        """
         retry_count = 0
         max_retries = 5
 
         while self.keep_running and retry_count < max_retries:
             try:
-                print(f"[*] מנסה להתחבר לשרת הורים (ניסיון {retry_count + 1}/{max_retries})...")
+                logger.info(f"Attempting to connect to parent server (attempt {retry_count + 1}/{max_retries})...")
 
                 self._main_socket = network_manager.get_persistent_parent_socket()
                 self._main_socket.settimeout(3)
@@ -858,52 +1070,68 @@ class ChildClient:
                 if msg_type == Protocol.ACK:
                     self.connected = True
                     self.connection_event.set()
-                    print(f"[+] מחובר לשרת הורים כ-{self.child_name}")
+                    logger.info(f"Connected to parent server as {self.child_name}")
                     self.request_domains_update()
                     time.sleep(1)
                     self.listen_for_updates()
                     return
 
             except socket.timeout:
-                print(f"[!] timeout בחיבור לשרת הורים")
+                logger.warning("Timeout connecting to parent server")
                 retry_count += 1
             except Exception as e:
-                print(f"[!] שגיאת חיבור: {e}")
+                logger.error(f"Connection error: {e}")
                 retry_count += 1
 
             self.connected = False
             network_manager.close_persistent_socket()
 
             if retry_count < max_retries:
-                print(f"[*] ממתין {2} שניות לפני ניסיון חוזר...")
+                logger.info(f"Waiting {2} seconds before retry...")
                 time.sleep(2)
 
-        print(f"[!] נכשל בחיבור לשרת הורים אחרי {max_retries} ניסיונות")
+        logger.error(f"Failed to connect to parent server after {max_retries} attempts")
         self.connection_event.set()
 
     def request_domains_update(self):
+        """
+        Request domain update from parent server.
+        """
         if self.connected and self._main_socket:
             try:
                 Protocol.send_message(self._main_socket, Protocol.GET_DOMAINS)
-                print("[*] בקשה לעדכון דומיינים נשלחה")
+                logger.info("Domain update request sent")
             except Exception as e:
-                print(f"[!] שגיאה בבקשת עדכון דומיינים: {e}")
+                logger.error(f"Error requesting domain update: {e}")
                 self.connected = False
 
     def wait_for_connection(self, timeout=10):
-        print(f"[*] ממתין לחיבור לשרת הורים (עד {timeout} שניות)...")
+        """
+        Wait for connection to parent server.
+
+        Args:
+            timeout (int): Maximum seconds to wait
+
+        Returns:
+            bool: True if connected successfully, False if timeout/failed
+        """
+        logger.info(f"Waiting for parent server connection (up to {timeout} seconds)...")
         if self.connection_event.wait(timeout):
             if self.connected:
-                print("[+] חיבור לשרת הורים הושלם בהצלחה")
+                logger.info("Parent server connection completed successfully")
                 return True
             else:
-                print("[!] חיבור נכשל, ממשיך בפעולה עצמאית")
+                logger.warning("Connection failed, continuing in standalone mode")
                 return False
         else:
-            print("[!] timeout בחיבור לשרת הורים")
+            logger.warning("Timeout connecting to parent server")
             return False
 
     def send_status_update(self):
+        """
+        Send periodic status updates to parent server.
+        Runs in background thread.
+        """
         while self.keep_running:
             if self.connected and self._main_socket:
                 try:
@@ -913,21 +1141,12 @@ class ChildClient:
                     self.connected = False
             time.sleep(3)
 
-    def clear_dns_cache_when_updated(self):
-        """ניקוי DNS cache כשהרשימה החסומה משתנה"""
-        try:
-            print("[*] 🧹 מנקה DNS cache אחרי עדכון...")
-            result = subprocess.run(['ipconfig', '/flushdns'],
-                                    capture_output=True, text=True, encoding='utf-8')
-            if result.returncode == 0:
-                print("[+] ✅ DNS cache נוקה")
-            else:
-                print(f"[!] בעיה בניקוי cache: {result.stderr}")
-        except Exception as e:
-            print(f"[!] שגיאה בניקוי cache: {e}")
-
     def listen_for_updates(self):
-        print(f"[*] מתחיל להאזין לעדכונים מהשרת...")
+        """
+        Listen for updates from parent server.
+        Handles domain updates, status requests, and error messages.
+        """
+        logger.info("Started listening for server updates...")
         while self.connected and self.keep_running:
             try:
                 self._main_socket.settimeout(30)
@@ -935,13 +1154,13 @@ class ChildClient:
 
                 if msg_type == Protocol.UPDATE_DOMAINS:
                     domains = data.get('domains', [])
-                    print(f"[DEBUG] 🔥 התקבל עדכון דומיינים: {domains}")
+                    logger.debug(f"Received domain update: {domains}")
                     global BLOCKED_DOMAINS
-                    old_domains = BLOCKED_DOMAINS.copy()  # שמירת הרשימה הישנה
+                    old_domains = BLOCKED_DOMAINS.copy()  # Save old list
                     BLOCKED_DOMAINS = set(domains)
-                    print(f"[DEBUG] 🔥 BLOCKED_DOMAINS עכשיו: {BLOCKED_DOMAINS}")
+                    logger.debug(f"BLOCKED_DOMAINS now: {BLOCKED_DOMAINS}")
 
-                    # אם יש שינוי ברשימה - נקה cache
+                    # If list changed - clear cache
                     if old_domains != BLOCKED_DOMAINS:
                         clear_dns_cache_when_updated()
 
@@ -952,96 +1171,116 @@ class ChildClient:
                     send_history_update()
 
                 elif msg_type == Protocol.ERROR:
-                    print(f"[!] שגיאה מהשרת: {data}")
+                    logger.error(f"Server error: {data}")
                     self.connected = False
                     break
 
             except socket.timeout:
                 continue
             except Exception as e:
-                print(f"[!] שגיאה בקבלת עדכון: {e}")
+                logger.error(f"Error receiving update: {e}")
                 self.connected = False
                 break
 
-        print("[*] הפסקת האזנה לשרת הורים")
+        logger.info("Stopped listening to parent server")
 
+
+# Global instances
 child_client = ChildClient()
 dns_manager = DNSManager()
 
 
 def is_blocked_domain(query_name):
-    # אם הילד לא רשום - חוסמים הכל!
+    """
+    Check if a domain should be blocked.
+
+    Args:
+        query_name (str): Domain name to check
+
+    Returns:
+        bool: True if domain should be blocked, False otherwise
+    """
+    # If child not registered - block everything!
     if not CHILD_NAME:
-        print(f"[BLOCK] ילד לא רשום - חוסם הכל: {query_name}")
+        logger.debug(f"Child not registered - blocking all: {query_name}")
         return True
 
-    # ניקוי הדומיין
+    # Clean domain
     original_query = query_name
     query_name = query_name.lower().strip('.')
 
-    print(f"[DEBUG] בודק דומיין: '{original_query}' -> '{query_name}'")
-    print(f"[DEBUG] רשימה חסומה: {BLOCKED_DOMAINS}")
+    logger.debug(f"Checking domain: '{original_query}' -> '{query_name}'")
+    logger.debug(f"Blocked list: {BLOCKED_DOMAINS}")
 
-    # חילוץ הדומיין הראשי (להשוואה עם zoom.us vs zoom.com)
+    # Extract main domain (for comparison with zoom.us vs zoom.com)
     main_domain_parts = query_name.split('.')
 
     for blocked_domain in BLOCKED_DOMAINS:
         blocked_domain = blocked_domain.lower().strip('.')
         blocked_parts = blocked_domain.split('.')
 
-        print(f"[DEBUG] משווה {query_name} עם {blocked_domain}")
+        logger.debug(f"Comparing {query_name} with {blocked_domain}")
 
-        # 1. התאמה מדויקת
+        # 1. Exact match
         if query_name == blocked_domain:
-            print(f"[DEBUG] ✅ התאמה מדויקת: {query_name}")
+            logger.debug(f"Exact match: {query_name}")
             return True
 
-        # 2. תת-דומיין רגיל (subdomain.domain.com)
+        # 2. Regular subdomain (subdomain.domain.com)
         if query_name.endswith('.' + blocked_domain):
-            print(f"[DEBUG] ✅ תת-דומיין: {query_name}")
+            logger.debug(f"Subdomain: {query_name}")
             return True
 
-        # 3. טיפול ב-www
+        # 3. Handle www
         if query_name == 'www.' + blocked_domain:
-            print(f"[DEBUG] ✅ www של דומיין חסום: {query_name}")
+            logger.debug(f"www of blocked domain: {query_name}")
             return True
 
-        # 4. 🆕 חסימה לפי שם האתר (zoom.com vs zoom.us)
+        # 4. Block by site name (zoom.com vs zoom.us)
         if len(blocked_parts) >= 2 and len(main_domain_parts) >= 2:
-            # השוואת החלק הראשי (zoom vs zoom)
+            # Compare main part (zoom vs zoom)
             if (blocked_parts[0] == main_domain_parts[0] and
-                    len(blocked_parts[0]) > 3):  # רק אתרים עם שם ייחודי
-                print(f"[DEBUG] ✅ שם אתר דומה: {main_domain_parts[0]} (על בסיס {blocked_parts[0]})")
+                    len(blocked_parts[0]) > 3):  # Only sites with unique name
+                logger.debug(f"Similar site name: {main_domain_parts[0]} (based on {blocked_parts[0]})")
                 return True
 
-        # 5. 🆕 דומיינים שקשורים (cdninstagram.com <- instagram.com)
+        # 5. Related domains (cdninstagram.com <- instagram.com)
         blocked_name = blocked_parts[0]  # "instagram"
         if blocked_name in query_name and len(blocked_name) > 4:
-            print(f"[DEBUG] ✅ דומיין קשור: {query_name} מכיל {blocked_name}")
+            logger.debug(f"Related domain: {query_name} contains {blocked_name}")
             return True
 
-    print(f"[DEBUG] ❌ {query_name} מותר")
+    logger.debug(f"{query_name} allowed")
     return False
 
+
 def handle_dns_request(data, addr, sock):
+    """
+    Handle incoming DNS request.
+
+    Args:
+        data (bytes): Raw DNS request data
+        addr (tuple): Client address (IP, port)
+        sock (socket.socket): DNS server socket
+    """
     try:
         packet_response = DNS(data)
     except Exception as e:
-        print(f"[!] שגיאה בניתוח בקשת DNS: {e}")
+        logger.error(f"Error parsing DNS request: {e}")
         return
 
     if packet_response.opcode == 0 and packet_response.qr == 0:
         try:
             query_name = packet_response[DNSQR].qname.decode().strip(".")
         except Exception as e:
-            print(f"[!] שגיאה בקריאת שם הדומיין: {e}")
+            logger.error(f"Error reading domain name: {e}")
             return
 
-        print(f"[+] בקשת DNS מ-{addr[0]} ל: {query_name}")
+        logger.info(f"DNS request from {addr[0]} to: {query_name}")
         current_time = datetime.now().isoformat()
 
         if is_blocked_domain(query_name):
-            print(f"[-] חוסם את {query_name}, מפנה ל-{BLOCK_PAGE_IP}")
+            logger.info(f"Blocking {query_name}, redirecting to {BLOCK_PAGE_IP}")
             add_to_history(query_name, current_time, was_blocked=True)
 
             response = DNS(
@@ -1054,7 +1293,7 @@ def handle_dns_request(data, addr, sock):
             sock.sendto(bytes(response), addr)
 
         else:
-            print(f"[+] מעביר את הבקשה ל-DNS האמיתי ({REAL_DNS_SERVER})")
+            logger.info(f"Forwarding request to real DNS ({REAL_DNS_SERVER})")
             add_to_history(query_name, current_time, was_blocked=False)
 
             try:
@@ -1064,9 +1303,9 @@ def handle_dns_request(data, addr, sock):
 
                 try:
                     response_dns = DNS(response_data)
-                    # 🆕 הגדרת TTL נמוך גם לתשובות רגילות!
+                    # Set low TTL for regular responses too!
                     for answer in response_dns.an:
-                        answer.ttl = 0  # ככה הדפדפן לא יזכור את התשובה
+                        answer.ttl = 0  # So browser won't remember the response
                     sock.sendto(bytes(response_dns), addr)
                 except:
                     sock.sendto(response_data, addr)
@@ -1075,27 +1314,31 @@ def handle_dns_request(data, addr, sock):
                 error_response = DNS(id=packet_response.id, qr=1, aa=1, rcode=2, qd=packet_response.qd)
                 sock.sendto(bytes(error_response), addr)
             except Exception as e:
-                print(f"[!] שגיאה בהעברת הבקשה ל-DNS האמיתי: {e}")
+                logger.error(f"Error forwarding request to real DNS: {e}")
                 error_response = DNS(id=packet_response.id, qr=1, aa=1, rcode=2, qd=packet_response.qd)
                 sock.sendto(bytes(error_response), addr)
 
 
 def start_dns_proxy():
-    print(f"[*] מפעיל Proxy DNS ל-{CHILD_NAME} על {LISTEN_IP}:{LISTEN_PORT}...")
-    print(f"[*] דומיינים חסומים: {', '.join(BLOCKED_DOMAINS) if BLOCKED_DOMAINS else 'ממתין לעדכון מהשרת'}")
-    print(f"[*] דף חסימה יוצג מכתובת: {BLOCK_PAGE_IP}")
+    """
+    Start DNS proxy server.
+    Main function that handles DNS interception and filtering.
+    """
+    logger.info(f"Starting DNS Proxy for {CHILD_NAME} on {LISTEN_IP}:{LISTEN_PORT}...")
+    logger.info(f"Blocked domains: {', '.join(BLOCKED_DOMAINS) if BLOCKED_DOMAINS else 'waiting for server update'}")
+    logger.info(f"Block page will be shown from address: {BLOCK_PAGE_IP}")
 
     try:
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         sock.bind((LISTEN_IP, LISTEN_PORT))
     except PermissionError:
-        print("[!] שגיאת הרשאות: לא ניתן להאזין לפורט 53. נסה להריץ את התוכנית כמנהל.")
+        logger.error("Permission error: Cannot listen on port 53. Try running the program as administrator.")
         return
     except socket.error as e:
-        print(f"[!] שגיאת סוקט: {e}")
+        logger.error(f"Socket error: {e}")
         return
 
-    print("[*] DNS Proxy פועל. לחץ Ctrl+C כדי לעצור.")
+    logger.info("DNS Proxy running. Press Ctrl+C to stop.")
 
     try:
         while True:
@@ -1103,138 +1346,145 @@ def start_dns_proxy():
                 data, addr = sock.recvfrom(512)
                 threading.Thread(target=handle_dns_request, args=(data, addr, sock), daemon=True).start()
             except Exception as e:
-                print(f"[!] שגיאה בטיפול בבקשה: {e}")
-                # 🆕 המשך במקום לקרוס!
+                logger.error(f"Error handling request: {e}")
+                # Continue instead of crashing!
                 continue
     except KeyboardInterrupt:
-        print("\n[*] עצירת השרת על ידי המשתמש.")
+        logger.info("Server stopped by user.")
         graceful_shutdown()
-    except Exception as e:  # 🆕 תפוס כל שגיאה!
-        print(f"\n[!] שגיאה קריטית ב-DNS Proxy: {e}")
+    except Exception as e:  # Catch any error!
+        logger.error(f"Critical error in DNS Proxy: {e}")
         graceful_shutdown()
     finally:
         sock.close()
-        print("[*] משחזר הגדרות DNS מקוריות...")
+        logger.info("Restoring original DNS settings...")
         dns_manager.restore_original_dns()
-        print("[*] השרת נסגר.")
+        logger.info("Server closed.")
 
 
 def display_startup_messages():
+    """
+    Display startup information and status messages.
+    """
     print("\n" + "=" * 70)
-    print("🛡  מערכת בקרת הורים - ילד")
+    print("Parental Control System - Child")
     print("=" * 70)
-    print(f" ילד: {CHILD_NAME}")
-    print(f" מצב: {'רשום במערכת' if CHILD_NAME else 'לא רשום - אינטרנט חסום'}")
-    print(f" DNS: 127.0.0.1 (מקומי)")
-    print(f" שרת הורים: {PARENT_SERVER_IP}:{COMMUNICATION_PORT}")
+    print(f" Child: {CHILD_NAME}")
+    print(f" Status: {'Registered in system' if CHILD_NAME else 'Not registered - Internet blocked'}")
+    print(f" DNS: 127.0.0.1 (local)")
+    print(f" Parent server: {PARENT_SERVER_IP}:{COMMUNICATION_PORT}")
 
-    print(" שרתי חסימה:")
+    print(" Block servers:")
     if HTTPS_AVAILABLE:
-        print("   🔒 HTTPS על פורט 443 - אתרים מאובטחים (Instagram, Facebook, וכו')")
-    print("   🔓 HTTP על פורט 80 - אתרים רגילים")
+        print("   HTTPS on port 443 - Secure sites (Instagram, Facebook, etc.)")
+    print("   HTTP on port 80 - Regular sites")
 
     print("=" * 70)
     if CHILD_NAME:
-        print(" המערכת פועלת - אינטרנט זמין עם חסימות מאובטחות")
-        print(" ✅ אתרי HTTPS חסומים יציגו דף חסימה ללא התרעות אבטחה")
+        print(" System running - Internet available with secure blocking")
+        print(" Blocked HTTPS sites will show block page without security warnings")
         print("")
-        print("🔍 איך לטפל ב'חיבור לא פרטי' בפעם הראשונה:")
-        print("   1. דפדפן יציג: 'Your connection is not private'")
-        print("   2. לחץ: 'Advanced' (מתקדם)")
-        print("   3. לחץ: 'Proceed to localhost (unsafe)'")
-        print("   4. זה יקרה רק פעם אחת לכל דפדפן!")
-        print("   ✨ מהפעם הבאה - דפי חסימה יפים ומאובטחים!")
+        print("How to handle 'Not private connection' first time:")
+        print("   1. Browser will show: 'Your connection is not private'")
+        print("   2. Click: 'Advanced'")
+        print("   3. Click: 'Proceed to localhost (unsafe)'")
+        print("   4. This will only happen once per browser!")
+        print("   From next time - beautiful and secure block pages!")
     else:
-        print(" נדרש רישום - אינטרנט חסום לחלוטין")
+        print(" Registration required - Internet completely blocked")
     print("=" * 70)
 
 
-# 🆕 הוספת פונקציה לבדיקת מצב התעודות
 def check_ssl_certificates():
-    """בדיקה שתעודות SSL נוצרו כראוי"""
+    """
+    Check that SSL certificates were created properly.
+
+    Returns:
+        bool: True if certificates are valid, False otherwise
+    """
     cert_file = "block_server_cert.pem"
     key_file = "block_server_key.pem"
 
     if os.path.exists(cert_file) and os.path.exists(key_file):
         try:
-            # בדיקה בסיסית שהקבצים תקינים
+            # Basic check that files are valid
             with open(cert_file, 'r') as f:
                 cert_content = f.read()
             with open(key_file, 'r') as f:
                 key_content = f.read()
 
             if 'BEGIN CERTIFICATE' in cert_content and 'BEGIN PRIVATE KEY' in key_content:
-                print("[SSL] ✅ תעודות SSL תקינות")
+                logger.info("SSL certificates are valid")
                 return True
             else:
-                print("[SSL] ⚠️ תעודות SSL לא תקינות")
+                logger.warning("SSL certificates are not valid")
                 return False
         except Exception as e:
-            print(f"[SSL] ❌ שגיאה בבדיקת תעודות: {e}")
+            logger.error(f"Error checking certificates: {e}")
             return False
     else:
-        print("[SSL] ⚠️ תעודות SSL לא נמצאו")
+        logger.warning("SSL certificates not found")
         return False
 
 
 if __name__ == "__main__":
     try:
-        print("\n מתחיל מערכת בקרת הורים...")
-        print("[*] בודק רישום קיים...")
+        logger.info("Starting parental control system...")
+        logger.info("Checking existing registration...")
         if check_child_registration():
-            print(f"[+]  נמצא רישום: {CHILD_NAME}")
+            logger.info(f"Found registration: {CHILD_NAME}")
         else:
-            print("[!]  לא נמצא רישום תקף")
-            print("[*]  מכין דף רישום...")
+            logger.warning("No valid registration found")
+            logger.info("Preparing registration page...")
 
-            # הפעלת שרת החסימה לפני הרישום
-            print("[*] מפעיל שרת דף רישום...")
+            # Start block server before registration
+            logger.info("Starting registration page server...")
             server_port = start_block_server()
 
             if not server_port:
-                print("[!] ❌ שרת לא הצליח להתחיל - בדוק הרשאות")
+                logger.error("Server failed to start - check permissions")
                 sys.exit(1)
 
-            # וגם מגדיר DNS כדי שהדף יעבוד
-            print("[*] מגדיר הפניית DNS...")
+            # Also set DNS so page works
+            logger.info("Setting up DNS redirect...")
             if dns_manager.setup_dns_redirect():
-                print("[+] ✅ הגדרות DNS עודכנו בהצלחה")
+                logger.info("DNS settings updated successfully")
             else:
-                print("[!] ⚠️ נדרשות הרשאות מנהל - הפעל כמנהל")
+                logger.error("Administrator privileges required - run as administrator")
                 sys.exit(1)
 
-            time.sleep(3)  # נותן זמן לשרת להתחיל
+            time.sleep(3)  # Give server time to start
 
             if not wait_for_registration():
-                print("\n❌ יציאה ללא רישום")
+                logger.error("Exiting without registration")
                 graceful_shutdown()
                 sys.exit(1)
 
         display_startup_messages()
 
-        # אם עדיין לא הגדרנו DNS (במקרה שהילד כבר היה רשום)
+        # If we haven't set DNS yet (case where child was already registered)
         if not dns_manager.original_dns:
-            print("[*] מגדיר הפניית DNS...")
+            logger.info("Setting up DNS redirect...")
             if dns_manager.setup_dns_redirect():
-                print("[+] ✅ הגדרות DNS עודכנו בהצלחה")
+                logger.info("DNS settings updated successfully")
             else:
-                print("[!] ⚠️ לא ניתן להגדיר DNS אוטומטית")
-                print("\n--- הגדרה ידנית ---")
-                print("1. פתח 'הגדרות רשת' או 'Network Settings'")
-                print("2. לחץ על 'שנה אפשרויות מתאם' או 'Change adapter options'")
-                print("3. לחץ ימני על הרשת שלך ובחר 'מאפיינים' או 'Properties'")
-                print("4. בחר 'Internet Protocol Version 4 (TCP/IPv4)' ולחץ 'מאפיינים'")
-                print("5. בחר 'השתמש בכתובות DNS הבאות' ובשדה הראשון הכנס: 127.0.0.1")
-                print("6. לחץ OK לשמירה")
+                logger.warning("Cannot set DNS automatically")
+                print("\n--- Manual Setup ---")
+                print("1. Open 'Network Settings'")
+                print("2. Click 'Change adapter options'")
+                print("3. Right-click your network and select 'Properties'")
+                print("4. Select 'Internet Protocol Version 4 (TCP/IPv4)' and click 'Properties'")
+                print("5. Select 'Use the following DNS server addresses' and in first field enter: 127.0.0.1")
+                print("6. Click OK to save")
                 print("-------------------------\n")
-                input("לחץ Enter אחרי שהגדרת את ה-DNS...")
+                input("Press Enter after setting up DNS...")
 
-        # רק אם השרת לא רץ כבר (במקרה שהילד כבר היה רשום)
+        # Only if server isn't already running (case where child was already registered)
         if BLOCK_SERVER_PORT is None:
-            print("[*] מפעיל שרת דף חסימה...")
+            logger.info("Starting block page server...")
             start_block_server()
 
-        print("[*] מתחיל חיבור לשרת הורים...")
+        logger.info("Starting connection to parent server...")
         child_client.child_name = CHILD_NAME
         connection_thread = threading.Thread(target=child_client.connect_to_parent, daemon=True)
         connection_thread.start()
@@ -1248,28 +1498,28 @@ if __name__ == "__main__":
         status_thread.start()
 
         if not child_client.connected:
-            print("[*] פועל ללא שרת הורים - רק דומיינים שיתקבלו מאוחר יותר יחסמו")
+            logger.info("Running without parent server - only domains received later will be blocked")
 
         print("=" * 70)
-        print(f"🎉 מערכת בקרת הורים פעילה עבור {CHILD_NAME}")
-        print(f"🔒 דומיינים חסומים: {len(BLOCKED_DOMAINS)}")
-        print("[*] מפעיל DNS Proxy...")
-        print("🛑 לחץ Ctrl+C לעצירת המערכת")
+        print(f"Parental Control System active for {CHILD_NAME}")
+        print(f"Blocked domains: {len(BLOCKED_DOMAINS)}")
+        print("Starting DNS Proxy...")
+        print("Press Ctrl+C to stop system")
         print("=" * 70)
 
         try:
             start_dns_proxy()
         except Exception as dns_error:
-            print(f"[!] שגיאה ב-DNS Proxy: {dns_error}")
+            logger.error(f"Error in DNS Proxy: {dns_error}")
             graceful_shutdown()
     except KeyboardInterrupt:
-        print("\n🛑 התקבלה בקשת עצירה...")
+        logger.info("Stop request received...")
         graceful_shutdown()
     except Exception as e:
-        print(f"\n[!] ❌ שגיאה קריטית: {e}")
+        logger.error(f"Critical error: {e}")
         graceful_shutdown()
     finally:
-        # 🆕 כעת זה יתבצע תמיד!
-        print("[*] 🔄 מתחיל סגירה סופית...")
+        # This will now always execute!
+        logger.info("Starting final shutdown...")
         graceful_shutdown()
         network_manager.cleanup_all()
