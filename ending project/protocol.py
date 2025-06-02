@@ -9,7 +9,7 @@ COMMUNICATION_PORT = 5005
 
 
 class EncryptionManager:
-    """מנהל הצפנה לתקשורת"""
+    """מנהל הצפנה לתקשורת - מסונכרן עם מערכת ההורים"""
 
     def __init__(self, key_file="communication_key.key"):
         self.key_file = key_file
@@ -232,6 +232,35 @@ class Protocol:
             print(f"❌ שגיאה בבדיקת הצפנה: {e}")
             return False
 
+    @staticmethod
+    def sync_encryption_keys():
+        """סנכרון מפתחות הצפנה בין הורה לילד"""
+        try:
+            # יצירת מפתח תקשורת משותף אם לא קיים
+            key_file = "communication_key.key"
+            if not os.path.exists(key_file):
+                print("[🔒] יוצר מפתח תקשורת משותף...")
+                key = Fernet.generate_key()
+                with open(key_file, 'wb') as f:
+                    f.write(key)
+
+                # הגנה על הקובץ
+                try:
+                    os.chmod(key_file, 0o600)
+                except:
+                    pass
+
+                print(f"[✅] מפתח תקשורת נוצר: {key_file}")
+                print("[⚠️] העתק קובץ זה למחשבי הילדים!")
+                return True
+            else:
+                print(f"[✅] מפתח תקשורת קיים: {key_file}")
+                return True
+
+        except Exception as e:
+            print(f"[❌] שגיאה בסנכרון מפתחות: {e}")
+            return False
+
 
 # פונקציות עזר לתאימות לאחור
 def send_message(sock, msg_type, data=None):
@@ -256,6 +285,9 @@ if __name__ == "__main__":
         print("2. כל התקשורת מוצפנת אוטומטית")
         print("3. המפתח נשמר ב-communication_key.key")
         print("4. העתק את הקובץ לכל הלקוחות!")
+
+        # סנכרון מפתחות
+        Protocol.sync_encryption_keys()
     else:
         print("\n❌ יש בעיה במערכת ההצפנה")
         print("🔧 בדוק שיש לך: pip install cryptography")

@@ -38,9 +38,9 @@ encryption_system = None
 file_manager = None
 
 
-# אתחול מיידי של מערכת ההצפנה
+# אתחול מיידי של מערכת ההצפנה - מסונכרן עם הפרוטוקול
 def ensure_encryption():
-    """וידוא שמערכת ההצפנה פועלת"""
+    """וידוא שמערכת ההצפנה פועלת ומסונכרנת"""
     global encryption_system, file_manager
     if encryption_system is None or file_manager is None:
         try:
@@ -48,17 +48,30 @@ def ensure_encryption():
             encryption_system = SimpleEncryption("parent_control_system")
             file_manager = SafeFileManager(encryption_system)
             print("[🔒] מערכת הצפנה אותחלה")
+
+            # סנכרון עם מפתח התקשורת
+            Protocol.sync_encryption_keys()
+
         except Exception as e:
             print(f"[❌] שגיאה באתחול הצפנה: {e}")
             return False
     return True
 
+
 def initialize_encryption():
-    """יצירת מערכת ההצפנה"""
+    """יצירת מערכת ההצפנה ומפתחות התקשורת"""
     global encryption_system, file_manager
+
+    # הצפנה לקבצי נתונים
     encryption_system = SimpleEncryption("parent_control_system")
     file_manager = SafeFileManager(encryption_system)
-    print("[🔒] מערכת הצפנה אותחלה")
+    print("[🔒] מערכת הצפנה לנתונים אותחלה")
+
+    # סנכרון מפתח התקשורת
+    if Protocol.sync_encryption_keys():
+        print("[🔒] מפתח תקשורת מסונכרן")
+    else:
+        print("[⚠️] בעיה בסנכרון מפתח תקשורת")
 
 
 def create_ssl_certificate():
@@ -153,7 +166,7 @@ MIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQDMQiXPRhmA3O2M
 
 # פונקציות עזר גלובליות לניהול נתונים
 def save_children_data():
-    """שמירת נתוני ילדים - פונקציה גלובלית מתוקנת"""
+    """שמירת נתוני ילדים - פונקציה גלובלית מתוקנת ומוצפנת"""
     global children_data
 
     if file_manager is None:
@@ -187,7 +200,7 @@ def save_children_data():
 
 
 def load_children_data():
-    """טעינת נתוני ילדים - פונקציה גלובלית מתוקנת"""
+    """טעינת נתוני ילדים - פונקציה גלובלית מתוקנת ומוצפנת"""
     global children_data
 
     if file_manager is None:
@@ -240,7 +253,7 @@ def load_children_data():
 
 
 def save_browsing_history():
-    """שמירת היסטוריית גלישה - פונקציה גלובלית מתוקנת"""
+    """שמירת היסטוריית גלישה - פונקציה גלובלית מתוקנת ומוצפנת"""
     global browsing_history
 
     if file_manager is None:
@@ -263,7 +276,7 @@ def save_browsing_history():
 
 
 def load_browsing_history():
-    """טעינת היסטוריית גלישה - פונקציה גלובלית מתוקנת"""
+    """טעינת היסטוריית גלישה - פונקציה גלובלית מתוקנת ומוצפנת"""
     global browsing_history
 
     if file_manager is None:
@@ -341,7 +354,7 @@ def add_to_browsing_history(child_name, entries):
 
 
 class UserManager:
-    """מחלקה לניהול משתמשים - הרשמה, התחברות ושמירת נתונים"""
+    """מחלקה לניהול משתמשים - הרשמה, התחברות ושמירת נתונים מוצפן"""
 
     def __init__(self, data_file='users_data.json'):
         self.data_file = data_file
@@ -358,7 +371,7 @@ class UserManager:
             self.users = file_manager.safe_load_json(self.data_file, encrypted=True)
 
             if self.users:
-                print(f"[*] נטענו נתונים מוצפנים עבור {len(self.users)} משתמשים")
+                print(f"[🔒] נטענו נתונים מוצפנים עבור {len(self.users)} משתמשים")
                 return
 
             # אם אין מוצפן, נסה רגיל והמר
@@ -391,7 +404,7 @@ class UserManager:
         try:
             success = file_manager.safe_save_json(self.data_file, self.users, encrypted=True)
             if success:
-                print("[*] נתוני משתמשים נשמרו מוצפנים")
+                print("[🔒] נתוני משתמשים נשמרו מוצפנים")
             else:
                 print("[!] שגיאה בשמירת נתוני משתמשים מוצפנים")
         except Exception as e:
@@ -444,7 +457,7 @@ class ParentServer:
         self.connection_threads = []
         self.threads_lock = threading.Lock()
 
-        # טעינת נתונים
+        # טעינת נתונים מוצפנים
         load_children_data()
         load_browsing_history()
 
@@ -556,8 +569,9 @@ class ParentServer:
         child_name = None
 
         try:
+            # שימוש בפרוטוקול המוצפן
             msg_type, data = Protocol.receive_message(client_socket)
-            print(f"[DEBUG] התקבלה הודעה: {msg_type}, נתונים: {data}")
+            print(f"[DEBUG] התקבלה הודעה מוצפנת: {msg_type}, נתונים: {data}")
 
             if msg_type == Protocol.REGISTER_CHILD:
                 child_name = data.get('name')
@@ -614,29 +628,29 @@ class ParentServer:
                 print(f"[-] {child_name} התנתק")
 
     def handle_child_communication(self, client_socket, child_name):
-        """טיפול בתקשורת עם ילד"""
-        print(f"[COMM] 🔄 התחלת תקשורת עם {child_name}")
+        """טיפול בתקשורת מוצפנת עם ילד"""
+        print(f"[COMM] 🔄 התחלת תקשורת מוצפנת עם {child_name}")
 
         while self.running:
             try:
                 client_socket.settimeout(30)
                 msg_type, data = Protocol.receive_message(client_socket)
-                print(f"[COMM] 📨 התקבלה הודעה: {msg_type} מ-{child_name}")
+                print(f"[COMM] 📨 התקבלה הודעה מוצפנת: {msg_type} מ-{child_name}")
 
                 if msg_type == Protocol.GET_DOMAINS:
                     with data_lock:
                         domains = list(children_data[child_name]['blocked_domains'])
                     Protocol.send_message(client_socket, Protocol.UPDATE_DOMAINS, {"domains": domains})
-                    print(f"[COMM] 📤 נשלחו דומיינים ל-{child_name}: {domains}")
+                    print(f"[COMM] 📤 נשלחו דומיינים מוצפנים ל-{child_name}: {domains}")
 
                 elif msg_type == Protocol.CHILD_STATUS:
                     with data_lock:
                         children_data[child_name]['last_seen'] = time.time()
                     Protocol.send_message(client_socket, Protocol.ACK)
-                    print(f"[COMM] ✅ ACK נשלח ל-{child_name}")
+                    print(f"[COMM] ✅ ACK מוצפן נשלח ל-{child_name}")
 
                 elif msg_type == Protocol.BROWSING_HISTORY:
-                    print(f"[COMM] 🔍 מעבד הודעת היסטוריה מ-{child_name}...")
+                    print(f"[COMM] 🔍 מעבד הודעת היסטוריה מוצפנת מ-{child_name}...")
 
                     if not isinstance(data, dict):
                         print(f"[COMM] ❌ נתונים לא תקינים - לא מילון: {type(data)}")
@@ -659,14 +673,14 @@ class ParentServer:
                         continue
 
                     try:
-                        print(f"[COMM] 🔄 מוסיף היסטוריה לבסיס הנתונים...")
+                        print(f"[COMM] 🔄 מוסיף היסטוריה מוצפנת לבסיס הנתונים...")
                         add_to_browsing_history(child_name_from_data, history_entries)
 
                         Protocol.send_message(client_socket, Protocol.ACK)
-                        print(f"[COMM] ✅ היסטוריה מ-{child_name} עובדה בהצלחה וACK נשלח")
+                        print(f"[COMM] ✅ היסטוריה מוצפנת מ-{child_name} עובדה בהצלחה וACK נשלח")
 
                     except Exception as history_error:
-                        print(f"[COMM] ❌ שגיאה בעיבוד היסטוריה: {history_error}")
+                        print(f"[COMM] ❌ שגיאה בעיבוד היסטוריה מוצפנת: {history_error}")
                         continue
 
                 elif msg_type == Protocol.ERROR:
@@ -676,10 +690,10 @@ class ParentServer:
             except socket.timeout:
                 continue
             except Exception as e:
-                print(f"[COMM] ❌ שגיאה בתקשורת עם {child_name}: {e}")
+                print(f"[COMM] ❌ שגיאה בתקשורת מוצפנת עם {child_name}: {e}")
                 break
 
-        print(f"[COMM] 🔚 סיום תקשורת עם {child_name}")
+        print(f"[COMM] 🔚 סיום תקשורת מוצפנת עם {child_name}")
 
     def start_communication_server(self):
         def run_server():
@@ -687,7 +701,7 @@ class ParentServer:
             self.server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             self.server_socket.bind(('', COMMUNICATION_PORT))
             self.server_socket.listen(5)
-            print(f"[*] שרת תקשורת מאזין על פורט {COMMUNICATION_PORT}")
+            print(f"[*] 🔒 שרת תקשורת מוצפן מאזין על פורט {COMMUNICATION_PORT}")
 
             while self.running:
                 try:
@@ -725,7 +739,7 @@ class ParentServer:
         if self.server_socket:
             try:
                 self.server_socket.close()
-                print("[*] שרת תקשורת נסגר")
+                print("[*] שרת תקשורת מוצפן נסגר")
             except:
                 pass
 
@@ -744,7 +758,7 @@ class ParentServer:
         try:
             save_children_data()
             save_browsing_history()
-            print("[*] ✅ נתונים נשמרו")
+            print("[*] ✅ נתונים מוצפנים נשמרו")
         except Exception as e:
             print(f"[!] שגיאה בשמירת נתונים: {e}")
 
@@ -772,7 +786,8 @@ class ParentHandler(http.server.SimpleHTTPRequestHandler):
         return None
 
     def notify_child_immediate(self, child_name):
-        print(f"[DEBUG] מנסה לעדכן {child_name}...")
+        """עדכון מיידי מוצפן לילד"""
+        print(f"[DEBUG] מנסה לעדכן {child_name} בתקשורת מוצפנת...")
         with data_lock:
             if child_name in active_connections:
                 conn_info = active_connections[child_name]
@@ -780,10 +795,17 @@ class ParentHandler(http.server.SimpleHTTPRequestHandler):
                     try:
                         sock = conn_info["socket"]
                         domains = list(children_data[child_name]['blocked_domains'])
+                        # שליחה מוצפנת
                         Protocol.send_message(sock, Protocol.UPDATE_DOMAINS, {"domains": domains})
-                        print(f"[*] נשלח עדכון מיידי ל-{child_name}")
+                        print(f"[*] נשלח עדכון מוצפן מיידי ל-{child_name}")
+                        # הוספת פקודת ניקוי cache מיידית
+                        try:
+                            Protocol.send_message(sock, "FORCE_DNS_CLEAR", {})
+                            print(f"[*] נשלחה פקודת ניקוי DNS מיידית ל-{child_name}")
+                        except:
+                            pass
                     except Exception as e:
-                        print(f"[!] שגיאה בעדכון {child_name}: {e}")
+                        print(f"[!] שגיאה בעדכון מוצפן {child_name}: {e}")
 
     def end_headers(self):
         """הוספת headers אבטחה ל-HTTPS"""
@@ -825,220 +847,7 @@ class ParentHandler(http.server.SimpleHTTPRequestHandler):
             self.send_header('Location', '/login')
             self.end_headers()
 
-        elif parsed_path.path == '/browsing_history':
-            logged_in_user = self.is_logged_in()
-            if not logged_in_user:
-                self.send_response(302)
-                self.send_header('Location', '/login')
-                self.end_headers()
-                return
-
-            user_name = user_manager.get_user_fullname(logged_in_user)
-
-            # פילטרים
-            child_filter = query_params.get('child', [''])[0]
-            status_filter = query_params.get('status', [''])[0]
-            domain_filter = query_params.get('domain', [''])[0]
-
-            # בניית אפשרויות ילדים
-            children_options = []
-            with data_lock:
-                for child_name in children_data.keys():
-                    selected = 'selected' if child_name == child_filter else ''
-                    children_options.append(f'<option value="{child_name}" {selected}>{child_name}</option>')
-
-            # סינון והצגת היסטוריה
-            filtered_history = []
-            with history_lock:
-                for child_name, entries in browsing_history.items():
-                    if child_filter and child_name != child_filter:
-                        continue
-
-                    for entry in entries:
-                        # סינון לפי סטטוס
-                        if status_filter == 'blocked' and not entry.get('was_blocked', False):
-                            continue
-                        if status_filter == 'allowed' and entry.get('was_blocked', False):
-                            continue
-
-                        # סינון לפי דומיין
-                        if domain_filter and domain_filter.lower() not in entry.get('domain', '').lower():
-                            continue
-
-                        filtered_history.append(entry)
-
-            # מיון לפי זמן (חדש ביותר קודם)
-            filtered_history.sort(key=lambda x: x.get('timestamp', ''), reverse=True)
-            filtered_history = filtered_history[:200]
-
-            # קיבוץ ההיסטוריה
-            grouped_history = group_browsing_by_main_site(filtered_history, time_window_minutes=30)
-
-            # בניית HTML לרשומות
-            history_entries = []
-            for entry in grouped_history:
-                formatted_entry = format_simple_grouped_entry(entry)
-                history_entries.append(formatted_entry)
-
-            # סטטיסטיקות
-            unique_sites = len(
-                set(entry.get('display_name', entry.get('main_domain', '')) for entry in grouped_history))
-            total_blocked = sum(1 for entry in grouped_history if entry.get('was_blocked', False))
-            total_allowed = len(grouped_history) - total_blocked
-
-            stats_cards = f'''
-                <div class="stat-card">
-                    <div class="stat-number">{len(grouped_history)}</div>
-                    <div class="stat-label">פעילויות מוצגות</div>
-                </div>
-                <div class="stat-card">
-                    <div class="stat-number">{unique_sites}</div>
-                    <div class="stat-label">אתרים ייחודיים</div>
-                </div>
-                <div class="stat-card">
-                    <div class="stat-number">{total_blocked}</div>
-                    <div class="stat-label">פעילויות חסומות</div>
-                </div>
-                <div class="stat-card">
-                    <div class="stat-number">{total_allowed}</div>
-                    <div class="stat-label">פעילויות מותרות</div>
-                </div>
-            '''
-
-            history_html = BROWSING_HISTORY_TEMPLATE.replace('${user_name}', user_name)
-            history_html = history_html.replace('${children_options}', ''.join(children_options))
-            history_html = history_html.replace('${domain_filter}', domain_filter)
-            history_html = history_html.replace('${total_entries}', str(len(grouped_history)))
-            history_html = history_html.replace('${stats_cards}', stats_cards)
-            history_html = history_html.replace('${message}', '')
-
-            if history_entries:
-                history_html = history_html.replace('${history_entries}', ''.join(history_entries))
-            else:
-                history_html = history_html.replace('${history_entries}',
-                                                    '<div class="empty-message">אין רשומות מתאימות לחיפוש</div>')
-
-            self.send_response(200)
-            self.send_header('Content-type', 'text/html; charset=utf-8')
-            self.end_headers()
-            self.wfile.write(history_html.encode('utf-8'))
-
-        elif parsed_path.path == '/dashboard':
-            logged_in_user = self.is_logged_in()
-            if not logged_in_user:
-                self.send_response(302)
-                self.send_header('Location', '/login')
-                self.end_headers()
-                return
-
-            user_name = user_manager.get_user_fullname(logged_in_user)
-            selected_child = query_params.get('child', [None])[0]
-
-            if selected_child and selected_child in children_data:
-                domains_html = []
-                with data_lock:
-                    child_domains = children_data[selected_child]['blocked_domains']
-                    for domain in child_domains:
-                        domains_html.append(f"""
-                            <div class="domain-item">
-                                <div>{domain}</div>
-                                <form method="post" action="/remove_domain" style="display:inline;">
-                                    <input type="hidden" name="child" value="{selected_child}">
-                                    <input type="hidden" name="domain" value="{domain}">
-                                    <button type="submit" class="remove-btn">הסר</button>
-                                </form>
-                            </div>
-                        """)
-
-                dashboard_html = DASHBOARD_TEMPLATE.replace('${children_cards}', '')
-                dashboard_html = dashboard_html.replace('${display_child_controls}', 'block')
-                dashboard_html = dashboard_html.replace('${current_child}', selected_child)
-                dashboard_html = dashboard_html.replace('${user_name}', user_name)
-                dashboard_html = dashboard_html.replace('${blocked_domains_html}',
-                                                        ''.join(
-                                                            domains_html) if domains_html else '<div class="empty-message">אין דומיינים חסומים</div>')
-            else:
-                children_cards = []
-                with data_lock:
-                    for child_name, child_info in children_data.items():
-                        is_connected = child_info.get('client_address') is not None
-                        status_class = "status-online" if is_connected else "status-offline"
-                        status_text = "מחובר" if is_connected else "לא מחובר"
-                        encoded_child_name = quote(child_name)
-
-                        children_cards.append(f"""
-                            <div class="child-card" onclick="window.location='/dashboard?child={encoded_child_name}'">
-                                <div class="child-icon">👶</div>
-                                <div class="child-name">{child_name}</div>
-                                <div class="child-status {status_class}">{status_text}</div>
-                                <p style="text-align: center; margin-top: 10px;">
-                                    {len(child_info['blocked_domains'])} אתרים חסומים
-                                </p>
-                            </div>
-                        """)
-
-                dashboard_html = DASHBOARD_TEMPLATE.replace('${children_cards}', ''.join(children_cards))
-                dashboard_html = dashboard_html.replace('${display_child_controls}', 'none')
-                dashboard_html = dashboard_html.replace('${current_child}', '')
-                dashboard_html = dashboard_html.replace('${user_name}', user_name)
-                dashboard_html = dashboard_html.replace('${blocked_domains_html}', '')
-
-            self.send_response(200)
-            self.send_header('Content-type', 'text/html; charset=utf-8')
-            self.end_headers()
-            self.wfile.write(dashboard_html.encode('utf-8'))
-
-        elif parsed_path.path == '/manage_children':
-            logged_in_user = self.is_logged_in()
-            if not logged_in_user:
-                self.send_response(302)
-                self.send_header('Location', '/login')
-                self.end_headers()
-                return
-
-            user_name = user_manager.get_user_fullname(logged_in_user)
-
-            # בניית רשימת הילדים
-            children_list = []
-            with data_lock:
-                for child_name, child_info in children_data.items():
-                    is_connected = child_info.get('client_address') is not None
-                    status_class = "status-online" if is_connected else "status-offline"
-                    status_text = "מחובר" if is_connected else "לא מחובר"
-                    encoded_child_name = quote(child_name)
-
-                    children_list.append(f"""
-                        <div class="child-item">
-                            <div class="child-info">
-                                <div class="child-icon">👶</div>
-                                <div class="child-details">
-                                    <h3>{child_name}</h3>
-                                    <p class="{status_class}">{status_text}</p>
-                                    <p>{len(child_info['blocked_domains'])} אתרים חסומים</p>
-                                </div>
-                            </div>
-                            <div class="child-actions">
-                                <a href="/dashboard?child={encoded_child_name}" class="manage-btn">נהל חסימות</a>
-                                <form method="post" action="/remove_child" style="display:inline;">
-                                    <input type="hidden" name="child_name" value="{child_name}">
-                                    <button type="submit" class="danger-btn" onclick="return confirm('האם אתה בטוח שברצונך למחוק את {child_name}?')">מחק</button>
-                                </form>
-                            </div>
-                        </div>
-                    """)
-
-            manage_html = MANAGE_CHILDREN_TEMPLATE.replace('${user_name}', user_name)
-            manage_html = manage_html.replace('${children_list}', ''.join(
-                children_list) if children_list else '<div style="padding: 20px; text-align: center; color: #666;">אין ילדים רשומים</div>')
-            manage_html = manage_html.replace('${message}', '')
-
-            self.send_response(200)
-            self.send_header('Content-type', 'text/html; charset=utf-8')
-            self.end_headers()
-            self.wfile.write(manage_html.encode('utf-8'))
-
         elif parsed_path.path == '/system_status':
-            # בדיקה אם המשתמש מחובר
             logged_in_user = self.is_logged_in()
             if not logged_in_user:
                 self.send_response(302)
@@ -1048,13 +857,15 @@ class ParentHandler(http.server.SimpleHTTPRequestHandler):
 
             user_name = user_manager.get_user_fullname(logged_in_user)
 
-            # בדיקת מצב המערכת
+            # בדיקת מצב ההצפנה המסונכרנת
             encryption_enabled = encryption_system is not None and file_manager is not None
+            protocol_encryption = Protocol.test_encryption()
 
             # בדיקת קיום קבצים מוצפנים
             children_encrypted = os.path.exists('children_data.json.encrypted')
             history_encrypted = os.path.exists('browsing_history.json.encrypted')
             users_encrypted = os.path.exists('users_data.json.encrypted')
+            communication_key = os.path.exists('communication_key.key')
 
             # סטטיסטיקות מערכת
             total_children = len(children_data)
@@ -1062,8 +873,8 @@ class ParentHandler(http.server.SimpleHTTPRequestHandler):
             total_history_entries = sum(len(entries) for entries in browsing_history.values())
             connected_children = sum(1 for info in children_data.values() if info.get('client_address') is not None)
 
-            status_color = "green" if encryption_enabled else "red"
-            status_text = "מוצפן ומאובטח 🔒" if encryption_enabled else "לא מאובטח ❌"
+            status_color = "green" if encryption_enabled and protocol_encryption else "orange"
+            status_text = "מוצפן ומסונכרן 🔒" if encryption_enabled and protocol_encryption else "חלקי 🔓"
 
             system_html = f"""
             <!DOCTYPE html>
@@ -1071,7 +882,7 @@ class ParentHandler(http.server.SimpleHTTPRequestHandler):
             <head>
                 <meta charset="UTF-8">
                 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-                <title>מצב המערכת - בקרת הורים</title>
+                <title>מצב המערכת - בקרת הורים מוצפנת</title>
                 <style>
                     body {{ 
                         font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; 
@@ -1182,8 +993,8 @@ class ParentHandler(http.server.SimpleHTTPRequestHandler):
             <body>
                 <div class="container">
                     <div class="header">
-                        <h1>📊 מצב המערכת</h1>
-                        <p style="font-size: 1.2em; margin: 10px 0;">שלום {user_name}! מעקב ובקרה על המערכת</p>
+                        <h1>🔒 מצב המערכת המוצפנת</h1>
+                        <p style="font-size: 1.2em; margin: 10px 0;">שלום {user_name}! בקרה מלאה על המערכת המאובטחת</p>
                     </div>
 
                     <div class="nav">
@@ -1199,7 +1010,7 @@ class ParentHandler(http.server.SimpleHTTPRequestHandler):
                             <div class="stat-number">{total_children}</div>
                             <div class="stat-label">ילדים במערכת</div>
                             <div class="connection-indicator {'online' if connected_children > 0 else 'offline'}"></div>
-                            <small>{connected_children} מחוברים כעת</small>
+                            <small>{connected_children} מחוברים מוצפנים</small>
                         </div>
                         <div class="stat-card">
                             <div class="stat-number">{total_domains_blocked}</div>
@@ -1207,18 +1018,18 @@ class ParentHandler(http.server.SimpleHTTPRequestHandler):
                         </div>
                         <div class="stat-card">
                             <div class="stat-number">{total_history_entries}</div>
-                            <div class="stat-label">רשומות היסטוריה</div>
+                            <div class="stat-label">רשומות מוצפנות</div>
                         </div>
                         <div class="stat-card">
-                            <div class="stat-number">{"✅" if encryption_enabled else "❌"}</div>
-                            <div class="stat-label">מצב אבטחה</div>
+                            <div class="stat-number">{"🔒" if encryption_enabled and protocol_encryption else "⚠️"}</div>
+                            <div class="stat-label">מצב הצפנה</div>
                         </div>
                     </div>
 
                     <div class="status-card">
-                        <h2>🔒 מצב אבטחה ואחסון</h2>
+                        <h2>🔒 מצב הצפנה מסונכרנת</h2>
                         <div class="status-indicator">סטטוס: {status_text}</div>
-                        <p>כל הנתונים מוצפנים ומאובטחים באופן אוטומטי</p>
+                        <p>מערכת הצפנה דו-שכבתית: נתונים + תקשורת</p>
 
                         <div style="margin-top: 20px;">
                             <h3>📁 קבצי המערכת</h3>
@@ -1234,7 +1045,7 @@ class ParentHandler(http.server.SimpleHTTPRequestHandler):
                             <div class="file-status">
                                 <div>
                                     <strong>היסטוריית גלישה</strong><br>
-                                    <small>רשומות פעילות של כל הילדים</small>
+                                    <small>רשומות פעילות מוצפנות</small>
                                 </div>
                                 <span class="status-badge {'encrypted' if history_encrypted else 'regular'}">
                                     {'🔒 מוצפן' if history_encrypted else '🔓 רגיל'}
@@ -1243,40 +1054,49 @@ class ParentHandler(http.server.SimpleHTTPRequestHandler):
                             <div class="file-status">
                                 <div>
                                     <strong>נתוני משתמשים</strong><br>
-                                    <small>פרטי התחברות והרשאות</small>
+                                    <small>פרטי התחברות מוצפנים</small>
                                 </div>
                                 <span class="status-badge {'encrypted' if users_encrypted else 'regular'}">
                                     {'🔒 מוצפן' if users_encrypted else '🔓 רגיל'}
+                                </span>
+                            </div>
+                            <div class="file-status">
+                                <div>
+                                    <strong>מפתח תקשורת</strong><br>
+                                    <small>הצפנת הודעות בין הורה לילד</small>
+                                </div>
+                                <span class="status-badge {'encrypted' if communication_key else 'regular'}">
+                                    {'🔒 קיים' if communication_key else '❌ חסר'}
                                 </span>
                             </div>
                         </div>
                     </div>
 
                     <div class="status-card">
-                        <h3>ℹ️ מידע על האבטחה</h3>
+                        <h3>🔐 מידע על ההצפנה המסונכרנת</h3>
                         <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 15px; margin-top: 15px;">
                             <div style="background: #e8f4fd; padding: 15px; border-radius: 8px;">
-                                <strong>🛡️ הצפנה אוטומטית</strong><br>
-                                כל נתון חדש מוצפן מיידית ברמה צבאית
+                                <strong>💾 הצפנת נתונים</strong><br>
+                                כל קובץ מוצפן ברמה צבאית (AES-256)
                             </div>
                             <div style="background: #fff2e8; padding: 15px; border-radius: 8px;">
-                                <strong>🔄 גיבוי חכם</strong><br>
-                                גיבויים אוטומטיים לפני כל שינוי
+                                <strong>📡 הצפנת תקשורת</strong><br>
+                                כל הודעה בין הורה לילד מוצפנת
                             </div>
                             <div style="background: #e8f8e8; padding: 15px; border-radius: 8px;">
-                                <strong>⚡ שמירה תקופתית</strong><br>
-                                נתונים נשמרים אוטומטית כל 30 שניות
+                                <strong>🔑 ניהול מפתחות</strong><br>
+                                מפתחות נפרדים לנתונים ותקשורת
                             </div>
                             <div style="background: #f0e8ff; padding: 15px; border-radius: 8px;">
-                                <strong>🔧 ללא תחזוקה</strong><br>
-                                המערכת מנוהלת ומאובטחת אוטומטית
+                                <strong>🔄 סנכרון אוטומטי</strong><br>
+                                המערכת מסנכרנת מפתחות אוטומטית
                             </div>
                         </div>
                     </div>
 
                     <div style="text-align: center; margin: 30px 0;">
                         <p style="color: rgba(255,255,255,0.8); font-size: 14px;">
-                            מערכת בקרת הורים מאובטחת | כל הנתונים מוצפנים תמיד
+                            מערכת בקרת הורים מוצפנת לחלוטין | הצפנה דו-שכבתית
                         </p>
                     </div>
                 </div>
@@ -1288,7 +1108,8 @@ class ParentHandler(http.server.SimpleHTTPRequestHandler):
             self.send_header('Content-type', 'text/html; charset=utf-8')
             self.end_headers()
             self.wfile.write(system_html.encode('utf-8'))
-            # בדיקה אם המשתמש מחובר
+
+        elif parsed_path.path == '/browsing_history':
             logged_in_user = self.is_logged_in()
             if not logged_in_user:
                 self.send_response(302)
@@ -1298,242 +1119,264 @@ class ParentHandler(http.server.SimpleHTTPRequestHandler):
 
             user_name = user_manager.get_user_fullname(logged_in_user)
 
-            # בדיקת מצב ההצפנה
-            encryption_enabled = encryption_system is not None and file_manager is not None
+            # פילטרים
+            child_filter = query_params.get('child', [''])[0]
+            status_filter = query_params.get('status', [''])[0]
+            domain_filter = query_params.get('domain', [''])[0]
 
-            # בדיקת קיום קבצים מוצפנים
-            children_encrypted = os.path.exists('children_data.json.encrypted')
-            history_encrypted = os.path.exists('browsing_history.json.encrypted')
-            users_encrypted = os.path.exists('users_data.json.encrypted')
+            # בניית אפשרויות ילדים
+            children_options = []
+            with data_lock:
+                for child_name in children_data.keys():
+                    selected = 'selected' if child_name == child_filter else ''
+                    children_options.append(f'<option value="{child_name}" {selected}>{child_name}</option>')
 
-            status_color = "green" if encryption_enabled else "orange"
-            status_text = "פעיל 🔒" if encryption_enabled else "כבוי 🔓"
+            # סינון והצגת היסטוריה
+            filtered_history = []
+            with history_lock:
+                for child_name, entries in browsing_history.items():
+                    if child_filter and child_name != child_filter:
+                        continue
 
-            encryption_html = f"""
-            <!DOCTYPE html>
-            <html dir="rtl" lang="he">
-            <head>
-                <meta charset="UTF-8">
-                <meta name="viewport" content="width=device-width, initial-scale=1.0">
-                <title>בקרת הצפנה - מערכת בקרת הורים</title>
-                <style>
-                    body {{ 
-                        font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; 
-                        margin: 0; 
-                        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-                        min-height: 100vh;
-                    }}
-                    .container {{ 
-                        max-width: 900px; 
-                        margin: 0 auto; 
-                        padding: 20px; 
-                    }}
-                    .header {{ 
-                        background: rgba(255,255,255,0.95); 
-                        color: #333; 
-                        padding: 30px; 
-                        border-radius: 15px; 
-                        margin-bottom: 20px; 
-                        box-shadow: 0 10px 30px rgba(0,0,0,0.2);
-                        text-align: center;
-                    }}
-                    .header h1 {{ margin: 0; font-size: 2.5em; color: #667eea; }}
-                    .status-card {{ 
-                        background: rgba(255,255,255,0.95); 
-                        padding: 25px; 
-                        border-radius: 15px; 
-                        box-shadow: 0 10px 30px rgba(0,0,0,0.1); 
-                        margin: 20px 0; 
-                    }}
-                    .status-indicator {{ 
-                        font-size: 28px; 
-                        font-weight: bold; 
-                        color: {status_color}; 
-                        margin: 15px 0;
-                    }}
-                    .btn {{ 
-                        padding: 12px 25px; 
-                        border: none; 
-                        border-radius: 8px; 
-                        cursor: pointer; 
-                        font-size: 16px; 
-                        text-decoration: none; 
-                        display: inline-block; 
-                        margin: 10px 5px;
-                        transition: all 0.3s ease;
-                    }}
-                    .btn:hover {{ transform: translateY(-2px); box-shadow: 0 5px 15px rgba(0,0,0,0.2); }}
-                    .btn-primary {{ background: #667eea; color: white; }}
-                    .btn-success {{ background: #28a745; color: white; }}
-                    .btn-warning {{ background: #ffc107; color: #212529; }}
-                    .btn-danger {{ background: #dc3545; color: white; }}
-                    .file-status {{ 
-                        margin: 15px 0; 
-                        padding: 15px; 
-                        background: #f8f9fa; 
-                        border-left: 4px solid #007bff; 
-                        border-radius: 5px;
-                    }}
-                    .nav {{ 
-                        margin: 20px 0; 
-                        text-align: center;
-                    }}
-                    .nav a {{ 
-                        margin: 0 10px; 
-                        padding: 10px 20px; 
-                        background: rgba(255,255,255,0.9); 
-                        color: #667eea; 
-                        text-decoration: none; 
-                        border-radius: 25px;
-                        font-weight: bold;
-                        transition: all 0.3s ease;
-                    }}
-                    .nav a:hover {{ 
-                        background: white; 
-                        transform: translateY(-2px);
-                        box-shadow: 0 5px 15px rgba(0,0,0,0.2);
-                    }}
-                    .info-grid {{
-                        display: grid;
-                        grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-                        gap: 20px;
-                        margin: 20px 0;
-                    }}
-                    .info-card {{
-                        background: rgba(255,255,255,0.95);
-                        padding: 20px;
-                        border-radius: 15px;
-                        box-shadow: 0 5px 15px rgba(0,0,0,0.1);
-                    }}
-                    .status-badge {{
-                        display: inline-block;
-                        padding: 5px 12px;
-                        border-radius: 20px;
-                        font-size: 14px;
-                        font-weight: bold;
-                        margin-right: 10px;
-                    }}
-                    .encrypted {{ background: #d4edda; color: #155724; }}
-                    .regular {{ background: #fff3cd; color: #856404; }}
-                    .missing {{ background: #f8d7da; color: #721c24; }}
-                </style>
-            </head>
-            <body>
-                <div class="container">
-                    <div class="header">
-                        <h1>🔒 בקרת הצפנה</h1>
-                        <p style="font-size: 1.2em; margin: 10px 0;">שלום {user_name}! נהל את אבטחת המערכת</p>
-                    </div>
+                    for entry in entries:
+                        # סינון לפי סטטוס
+                        if status_filter == 'blocked' and not entry.get('was_blocked', False):
+                            continue
+                        if status_filter == 'allowed' and entry.get('was_blocked', False):
+                            continue
 
-                    <div class="nav">
-                        <a href="/dashboard">🏠 דף הבית</a>
-                        <a href="/manage_children">👶 ניהול ילדים</a>
-                        <a href="/browsing_history">📊 היסטוריה</a>
-                        <a href="/logout">🚪 יציאה</a>
-                    </div>
+                        # סינון לפי דומיין
+                        if domain_filter and domain_filter.lower() not in entry.get('domain', '').lower():
+                            continue
 
-                    <div class="status-card">
-                        <h2>📊 מצב הצפנה נוכחי</h2>
-                        <div class="status-indicator">סטטוס: {status_text}</div>
-                        <p style="font-size: 1.1em;">הצפנת קבצים מגינה על הנתונים הרגישים של המשפחה שלך מפני גישה לא מורשית</p>
+                        filtered_history.append(entry)
 
-                        {"<p style='color: green; font-weight: bold;'>✅ מערכת ההצפנה פועלת ומוכנה לשימוש</p>" if encryption_enabled else "<p style='color: orange; font-weight: bold;'>⚠️ מערכת ההצפנה לא פעילה</p>"}
-                    </div>
+            # מיון לפי זמן (חדש ביותר קודם)
+            filtered_history.sort(key=lambda x: x.get('timestamp', ''), reverse=True)
+            filtered_history = filtered_history[:200]
 
-                    <div class="info-grid">
-                        <div class="info-card">
-                            <h3>📁 מצב קבצי המערכת</h3>
-                            <div class="file-status">
-                                <span class="status-badge {'encrypted' if children_encrypted else 'regular'}">
-                                    {'🔒 מוצפן' if children_encrypted else '🔓 רגיל'}
-                                </span>
-                                <strong>נתוני ילדים</strong><br>
-                                <small>מכיל רשימת ילדים ואתרים חסומים</small>
-                            </div>
-                            <div class="file-status">
-                                <span class="status-badge {'encrypted' if history_encrypted else 'regular'}">
-                                    {'🔒 מוצפן' if history_encrypted else '🔓 רגיל'}
-                                </span>
-                                <strong>היסטוריית גלישה</strong><br>
-                                <small>רשומות גלישה של כל הילדים</small>
-                            </div>
-                            <div class="file-status">
-                                <span class="status-badge {'encrypted' if users_encrypted else 'regular'}">
-                                    {'🔒 מוצפן' if users_encrypted else '🔓 רגיל'}
-                                </span>
-                                <strong>נתוני משתמשים</strong><br>
-                                <small>פרטי התחברות והרשאות</small>
-                            </div>
-                        </div>
+            # קיבוץ ההיסטוריה
+            grouped_history = group_browsing_by_main_site(filtered_history, time_window_minutes=30)
 
-                        <div class="info-card">
-                            <h3>🔧 פעולות מערכת</h3>
-                            <p>כל הפעולות מתבצעות אוטומטית ובבטחה:</p>
-                            <ul style="text-align: right;">
-                                <li>✅ גיבוי אוטומטי לפני כל שינוי</li>
-                                <li>✅ שמירה מוצפנת של נתונים חדשים</li>
-                                <li>✅ התאוששות מגיבויים במקרה צורך</li>
-                                <li>✅ המרה חלקה מקבצים ישנים</li>
-                            </ul>
+            # בניית HTML לרשומות
+            history_entries = []
+            for entry in grouped_history:
+                formatted_entry = format_simple_grouped_entry(entry)
+                history_entries.append(formatted_entry)
 
-                            <div style="margin-top: 20px; padding-top: 20px; border-top: 1px solid #eee;">
-                                <p><strong>🔑 מיקום מפתח הצפנה:</strong></p>
-                                <code style="background: #f1f1f1; padding: 5px; border-radius: 3px;">
-                                    parent_control_system_encryption.key
-                                </code>
-                                <br><small style="color: #666;">שמור קובץ זה במקום בטוח!</small>
-                            </div>
-                        </div>
-                    </div>
+            # סטטיסטיקות
+            unique_sites = len(
+                set(entry.get('display_name', entry.get('main_domain', '')) for entry in grouped_history))
+            total_blocked = sum(1 for entry in grouped_history if entry.get('was_blocked', False))
+            total_allowed = len(grouped_history) - total_blocked
 
-                    <div class="status-card">
-                        <h3>ℹ️ מידע חשוב על האבטחה</h3>
-                        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 15px; margin-top: 15px;">
-                            <div style="background: #e8f4fd; padding: 15px; border-radius: 8px;">
-                                <strong>🛡️ הגנה</strong><br>
-                                הצפנה ברמה צבאית (AES-256) מגינה על הנתונים שלך
-                            </div>
-                            <div style="background: #fff2e8; padding: 15px; border-radius: 8px;">
-                                <strong>🔄 גיבוי</strong><br>
-                                גיבויים אוטומטיים נוצרים לפני כל פעולה
-                            </div>
-                            <div style="background: #e8f8e8; padding: 15px; border-radius: 8px;">
-                                <strong>⚡ ביצועים</strong><br>
-                                המערכת תמשיך לעבוד במהירות המקסימלית
-                            </div>
-                            <div style="background: #f0e8ff; padding: 15px; border-radius: 8px;">
-                                <strong>🔧 תחזוקה</strong><br>
-                                ניהול אוטומטי ללא צורך בהתערבות
-                            </div>
-                        </div>
-                    </div>
-
-                    <div style="text-align: center; margin: 30px 0;">
-                        <p style="color: rgba(255,255,255,0.8); font-size: 14px;">
-                            מערכת בקרת הורים מתקדמת עם הצפנה מלאה | גרסה 2.0
-                        </p>
-                    </div>
+            stats_cards = f'''
+                <div class="stat-card">
+                    <div class="stat-number">{len(grouped_history)}</div>
+                    <div class="stat-label">פעילויות מוצגות</div>
                 </div>
-            </body>
-            </html>
-            """
+                <div class="stat-card">
+                    <div class="stat-number">{unique_sites}</div>
+                    <div class="stat-label">אתרים ייחודיים</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-number">{total_blocked}</div>
+                    <div class="stat-label">פעילויות חסומות</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-number">{total_allowed}</div>
+                    <div class="stat-label">פעילויות מותרות</div>
+                </div>
+            '''
+
+            history_html = BROWSING_HISTORY_TEMPLATE.replace('${user_name}', user_name)
+            history_html = history_html.replace('${children_options}', ''.join(children_options))
+            history_html = history_html.replace('${domain_filter}', domain_filter)
+            history_html = history_html.replace('${total_entries}', str(len(grouped_history)))
+            history_html = history_html.replace('${stats_cards}', stats_cards)
+            history_html = history_html.replace('${message}', '')
+
+            if history_entries:
+                history_html = history_html.replace('${history_entries}', ''.join(history_entries))
+            else:
+                history_html = history_html.replace('${history_entries}',
+                                                    '<div class="empty-message">אין רשומות מתאימות לחיפוש</div>')
 
             self.send_response(200)
             self.send_header('Content-type', 'text/html; charset=utf-8')
             self.end_headers()
-            self.wfile.write(encryption_html.encode('utf-8'))
+            self.wfile.write(history_html.encode('utf-8'))
+
+        elif parsed_path.path == '/manage_children':
+            logged_in_user = self.is_logged_in()
+            if not logged_in_user:
+                self.send_response(302)
+                self.send_header('Location', '/login')
+                self.end_headers()
+                return
+
+            user_name = user_manager.get_user_fullname(logged_in_user)
+
+            # בניית רשימת הילדים
+            children_list = []
+            with data_lock:
+                for child_name, child_info in children_data.items():
+                    is_connected = child_info.get('client_address') is not None
+                    status_class = "status-online" if is_connected else "status-offline"
+                    status_text = "מחובר מוצפן" if is_connected else "לא מחובר"
+                    encoded_child_name = quote(child_name)
+
+                    children_list.append(f"""
+                        <div class="child-item">
+                            <div class="child-info">
+                                <div class="child-icon">👶</div>
+                                <div class="child-details">
+                                    <h3>{child_name}</h3>
+                                    <p class="{status_class}">{status_text}</p>
+                                    <p>{len(child_info['blocked_domains'])} אתרים חסומים</p>
+                                </div>
+                            </div>
+                            <div class="child-actions">
+                                <a href="/dashboard?child={encoded_child_name}" class="manage-btn">נהל חסימות</a>
+                                <form method="post" action="/remove_child" style="display:inline;">
+                                    <input type="hidden" name="child_name" value="{child_name}">
+                                    <button type="submit" class="danger-btn" onclick="return confirm('האם אתה בטוח שברצונך למחוק את {child_name}?')">מחק</button>
+                                </form>
+                            </div>
+                        </div>
+                    """)
+
+            manage_html = MANAGE_CHILDREN_TEMPLATE.replace('${user_name}', user_name)
+            manage_html = manage_html.replace('${children_list}', ''.join(
+                children_list) if children_list else '<div style="padding: 20px; text-align: center; color: #666;">אין ילדים רשומים</div>')
+            manage_html = manage_html.replace('${message}', '')
+
+            self.send_response(200)
+            self.send_header('Content-type', 'text/html; charset=utf-8')
+            self.end_headers()
+            self.wfile.write(manage_html.encode('utf-8'))
+
+        elif parsed_path.path == '/dashboard':
+            logged_in_user = self.is_logged_in()
+            if not logged_in_user:
+                self.send_response(302)
+                self.send_header('Location', '/login')
+                self.end_headers()
+                return
+
+            user_name = user_manager.get_user_fullname(logged_in_user)
+            selected_child = query_params.get('child', [None])[0]
+
+            if selected_child and selected_child in children_data:
+                domains_html = []
+                with data_lock:
+                    child_domains = children_data[selected_child]['blocked_domains']
+                    for domain in child_domains:
+                        domains_html.append(f"""
+                            <div class="domain-item">
+                                <div>{domain}</div>
+                                <form method="post" action="/remove_domain" style="display:inline;">
+                                    <input type="hidden" name="child" value="{selected_child}">
+                                    <input type="hidden" name="domain" value="{domain}">
+                                    <button type="submit" class="remove-btn">הסר</button>
+                                </form>
+                            </div>
+                        """)
+
+                dashboard_html = DASHBOARD_TEMPLATE.replace('${children_cards}', '')
+                dashboard_html = dashboard_html.replace('${display_child_controls}', 'block')
+                dashboard_html = dashboard_html.replace('${current_child}', selected_child)
+                dashboard_html = dashboard_html.replace('${user_name}', user_name)
+                dashboard_html = dashboard_html.replace('${blocked_domains_html}',
+                                                        ''.join(
+                                                            domains_html) if domains_html else '<div class="empty-message">אין דומיינים חסומים</div>')
+            else:
+                children_cards = []
+                with data_lock:
+                    for child_name, child_info in children_data.items():
+                        is_connected = child_info.get('client_address') is not None
+                        status_class = "status-online" if is_connected else "status-offline"
+                        status_text = "מחובר מוצפן" if is_connected else "לא מחובר"
+                        encoded_child_name = quote(child_name)
+
+                        children_cards.append(f"""
+                            <div class="child-card" onclick="window.location='/dashboard?child={encoded_child_name}'">
+                                <div class="child-icon">👶</div>
+                                <div class="child-name">{child_name}</div>
+                                <div class="child-status {status_class}">{status_text}</div>
+                                <p style="text-align: center; margin-top: 10px;">
+                                    {len(child_info['blocked_domains'])} אתרים חסומים
+                                </p>
+                            </div>
+                        """)
+
+                dashboard_html = DASHBOARD_TEMPLATE.replace('${children_cards}', ''.join(children_cards))
+                dashboard_html = dashboard_html.replace('${display_child_controls}', 'none')
+                dashboard_html = dashboard_html.replace('${current_child}', '')
+                dashboard_html = dashboard_html.replace('${user_name}', user_name)
+                dashboard_html = dashboard_html.replace('${blocked_domains_html}', '')
+
+            self.send_response(200)
+            self.send_header('Content-type', 'text/html; charset=utf-8')
+            self.end_headers()
+            self.wfile.write(dashboard_html.encode('utf-8'))
 
         else:
             self.send_error(404)
 
     def do_POST(self):
-        print(f"[DEBUG] POST request לכתובת: {self.path}")
-
         content_length = int(self.headers['Content-Length'])
         post_data = self.rfile.read(content_length)
         post_params = parse_qs(post_data.decode('utf-8'))
 
-        if self.path == '/register':
+        if self.path == '/add_domain':
+            logged_in_user = self.is_logged_in()
+            if not logged_in_user:
+                self.send_response(302)
+                self.send_header('Location', '/login')
+                self.end_headers()
+                return
+
+            child_name = post_params.get('child', [''])[0]
+            domain = post_params.get('domain', [''])[0].strip()
+
+            if child_name and domain and child_name in children_data:
+                with data_lock:
+                    children_data[child_name]['blocked_domains'].add(domain)
+                save_children_data()
+                print(f"[+] נוסף דומיין {domain} עבור {child_name}")
+                self.notify_child_immediate(child_name)
+
+            encoded_child_name = quote(child_name)
+            self.send_response(302)
+            self.send_header('Location', f'/dashboard?child={encoded_child_name}')
+            self.end_headers()
+
+        elif self.path == '/remove_domain':
+            logged_in_user = self.is_logged_in()
+            if not logged_in_user:
+                self.send_response(302)
+                self.send_header('Location', '/login')
+                self.end_headers()
+                return
+
+            child_name = post_params.get('child', [''])[0]
+            domain = post_params.get('domain', [''])[0].strip()
+
+            if child_name and domain and child_name in children_data:
+                with data_lock:
+                    if domain in children_data[child_name]['blocked_domains']:
+                        children_data[child_name]['blocked_domains'].remove(domain)
+                save_children_data()
+                print(f"[-] הוסר דומיין {domain} מ-{child_name}")
+                self.notify_child_immediate(child_name)
+
+            encoded_child_name = quote(child_name)
+            self.send_response(302)
+            self.send_header('Location', f'/dashboard?child={encoded_child_name}')
+            self.end_headers()
+
+        elif self.path == '/register':
             fullname = post_params.get('fullname', [''])[0].strip()
             email = post_params.get('email', [''])[0].strip()
             password = post_params.get('password', [''])[0]
@@ -1591,53 +1434,6 @@ class ParentHandler(http.server.SimpleHTTPRequestHandler):
                 self.send_header('Content-type', 'text/html; charset=utf-8')
                 self.end_headers()
                 self.wfile.write(login_html.encode('utf-8'))
-
-        elif self.path == '/add_domain':
-            logged_in_user = self.is_logged_in()
-            if not logged_in_user:
-                self.send_response(302)
-                self.send_header('Location', '/login')
-                self.end_headers()
-                return
-
-            child_name = post_params.get('child', [''])[0]
-            domain = post_params.get('domain', [''])[0].strip()
-
-            if child_name and domain and child_name in children_data:
-                with data_lock:
-                    children_data[child_name]['blocked_domains'].add(domain)
-                save_children_data()
-                print(f"[+] נוסף דומיין {domain} עבור {child_name}")
-                self.notify_child_immediate(child_name)
-
-            encoded_child_name = quote(child_name)
-            self.send_response(302)
-            self.send_header('Location', f'/dashboard?child={encoded_child_name}')
-            self.end_headers()
-
-        elif self.path == '/remove_domain':
-            logged_in_user = self.is_logged_in()
-            if not logged_in_user:
-                self.send_response(302)
-                self.send_header('Location', '/login')
-                self.end_headers()
-                return
-
-            child_name = post_params.get('child', [''])[0]
-            domain = post_params.get('domain', [''])[0].strip()
-
-            if child_name and domain and child_name in children_data:
-                with data_lock:
-                    if domain in children_data[child_name]['blocked_domains']:
-                        children_data[child_name]['blocked_domains'].remove(domain)
-                save_children_data()
-                print(f"[-] הוסר דומיין {domain} מ-{child_name}")
-                self.notify_child_immediate(child_name)
-
-            encoded_child_name = quote(child_name)
-            self.send_response(302)
-            self.send_header('Location', f'/dashboard?child={encoded_child_name}')
-            self.end_headers()
 
         elif self.path == '/add_child':
             print("[DEBUG] 🔹 נכנסתי לטיפול בהוספת ילד")
@@ -1739,6 +1535,7 @@ class ParentHandler(http.server.SimpleHTTPRequestHandler):
             self.send_header('Location', '/system_status')
             self.end_headers()
 
+        # יתר הפונקציות ממשיכות...
         else:
             self.send_response(404)
             self.end_headers()
@@ -1871,23 +1668,19 @@ print("[*] 🔒 מערכת הצפנה מתקדמת מוכנה")
 user_manager = UserManager()
 
 if __name__ == "__main__":
-    print("🚀 מתחיל שרת בקרת הורים מתקדם...")
+    print("🚀 מתחיל שרת בקרת הורים מוצפן...")
     print("=" * 50)
 
-    # בדיקה סופית
-    if not final_check():
-        print("❌ המערכת לא מוכנה להפעלה")
-        exit(1)
-
-    # אתחול מערכת ההצפנה
+    # אתחול מערכת ההצפנה המסונכרנת
     initialize_encryption()
 
     # יצירת שרת ההורים
     parent_server = ParentServer()
 
-    print("[🔒] מערכת הצפנה מוכנה!")
+    print("[🔒] מערכת הצפנה מסונכרנת מוכנה!")
     print(f"[👥] {len(user_manager.users)} משתמשים רשומים")
     print(f"[👶] {len(children_data)} ילדים במערכת")
+    print("[📡] תקשורת מוצפנת עם הילדים")
 
     try:
         print("\n[*] 🔒 מתחיל שרת בקרת הורים עם HTTPS")
@@ -1895,7 +1688,7 @@ if __name__ == "__main__":
 
         # יצירת תעודת SSL
         if create_ssl_certificate():
-            print("[*] ✅ מפעיל שרת HTTPS")
+            print("[*] ✅ מפעיל שרת HTTPS מוצפן")
 
             with socketserver.TCPServer(("", HTTPS_PORT), ParentHandler) as httpd:
                 try:
@@ -1910,25 +1703,18 @@ if __name__ == "__main__":
 
                     httpd.socket = context.wrap_socket(httpd.socket, server_side=True)
 
-                    print(f"\n🎉 השרת מוכן!")
+                    print(f"\n🎉 השרת המוצפן מוכן!")
                     print(f"[*] 🔒 שרת HTTPS פועל על https://localhost:{HTTPS_PORT}")
-                    print(f"[*] 📡 שרת תקשורת פועל על פורט {COMMUNICATION_PORT}")
-                    print(f"[*] 🎯 מוכן לקבל חיבורים מילדים")
+                    print(f"[*] 📡 שרת תקשורת מוצפן פועל על פורט {COMMUNICATION_PORT}")
+                    print(f"[*] 🎯 מוכן לקבל חיבורים מוצפנים מילדים")
 
                     server_url = f"https://localhost:{HTTPS_PORT}"
                     print(f"\n[*] 🌐 פותח דפדפן: {server_url}")
                     print("[!] ⚠️  אם הדפדפן מתריע - לחץ 'Advanced' ← 'Proceed to localhost'")
                     print("\n" + "=" * 50)
+                    print("[*] 🔒 כל התקשורת והנתונים מוצפנים")
                     print("[*] לחץ Ctrl+C לעצירת השרת")
                     print("=" * 50)
-
-                    # יצירת גיבוי ראשוני
-                    backup_dir = backup_all_data()
-                    if backup_dir:
-                        print(f"[📦] גיבוי ראשוני נוצר: {backup_dir}")
-
-                    # ניקוי קבצים ישנים
-                    cleanup_old_files()
 
                     webbrowser.open(server_url)
                     httpd.serve_forever()
@@ -1941,9 +1727,9 @@ if __name__ == "__main__":
             raise Exception("לא ניתן ליצור תעודת SSL")
 
     except KeyboardInterrupt:
-        print("\n[*] 🛑 עצירת השרת על ידי המשתמש...")
+        print("\n[*] 🛑 עצירת השרת המוצפן על ידי המשתמש...")
         parent_server.shutdown()
-        print("[*] ✅ השרת נסגר בבטחה")
+        print("[*] ✅ השרת המוצפן נסגר בבטחה")
 
     except Exception as e:
         print(f"[!] ❌ שגיאה בהפעלת HTTPS: {e}")
@@ -1956,6 +1742,7 @@ if __name__ == "__main__":
                 print(f"\n[*] 🔓 שרת HTTP פועל על http://localhost:{HTTP_PORT}")
                 print("[*] 👤 משתמש דמו: admin@example.com / admin123")
                 print("[*] ⚠️  במצב HTTP - אין הצפנת תעבורה!")
+                print("[*] 🔒 אבל הנתונים והתקשורת עדיין מוצפנים")
 
                 server_url = f"http://localhost:{HTTP_PORT}"
                 webbrowser.open(server_url)
@@ -1976,7 +1763,7 @@ if __name__ == "__main__":
         finally:
             try:
                 parent_server.shutdown()
-                print("[*] 🔒 נתונים נשמרו")
+                print("[*] 🔒 נתונים מוצפנים נשמרו")
                 print("[*] 👋 להתראות!")
             except:
                 pass
