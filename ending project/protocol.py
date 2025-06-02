@@ -106,7 +106,7 @@ class Protocol:
             data = {}
 
         # אם צריך הצפנה
-        if encrypted and msg_type not in [Protocol.HANDSHAKE, Protocol.ERROR]:
+        if encrypted and msg_type not in [Protocol.ERROR]:
             encryption_manager = Protocol.get_encryption_manager()
 
             # הצפנת הנתונים
@@ -201,7 +201,7 @@ class Protocol:
         """שליחת לחיצת יד ראשונית (לא מוצפנת)"""
         Protocol.send_message(sock, Protocol.HANDSHAKE,
                               {"version": "1.0", "encryption": "enabled"},
-                              encrypted=False)
+                              encrypted=True)
 
     @staticmethod
     def test_encryption():
