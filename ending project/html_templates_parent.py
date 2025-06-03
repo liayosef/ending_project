@@ -720,7 +720,7 @@ BROWSING_HISTORY_TEMPLATE = """<!DOCTYPE html>
    <div class="header">
        <div class="header-content">
            <div class="logo-container">
-               <div class="logo-circle">🛡</div>
+               <div class="logo-circle">🛡️</div>
                <h1>Browsing History</h1>
            </div>
            <div class="user-info">

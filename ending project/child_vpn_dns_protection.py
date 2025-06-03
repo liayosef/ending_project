@@ -73,35 +73,54 @@ class ChildVPNDNSProtection:
             # Check running processes
             for proc in psutil.process_iter(['pid', 'name', 'exe']):
                 try:
-                    proc_name = proc.info['name'].lower()
-                    proc_exe = proc.info.get('exe', '').lower()
+                    # בדיקה שהשדות לא None לפני שימוש
+                    proc_name = proc.info.get('name')
+                    proc_exe = proc.info.get('exe')
+
+                    # וידוא שהשמות לא None לפני המרה לlower
+                    if proc_name is None:
+                        proc_name = ""
+                    else:
+                        proc_name = proc_name.lower()
+
+                    if proc_exe is None:
+                        proc_exe = ""
+                    else:
+                        proc_exe = proc_exe.lower()
 
                     # Check against known VPN process names
                     for vpn_name in self.vpn_process_names:
                         if vpn_name in proc_name or vpn_name in proc_exe:
                             result["detected_processes"].append({
                                 "pid": proc.info['pid'],
-                                "name": proc.info['name'],
+                                "name": proc.info.get('name', 'Unknown'),
                                 "exe": proc.info.get('exe', 'Unknown'),
                                 "vpn_type": vpn_name
                             })
                             result["vpn_processes_found"] = True
 
-                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                except (psutil.NoSuchProcess, psutil.AccessDenied, AttributeError):
+                    # הוסף AttributeError לטיפול בשדות None
+                    continue
+                except Exception as e:
+                    # תפוס שגיאות נוספות
+                    logger.debug(f"Error checking process: {e}")
                     continue
 
             # Check for VPN services (Windows/Linux)
-            vpn_services = self._check_vpn_services()
-            result["vpn_services"] = vpn_services
+            try:
+                vpn_services = self._check_vpn_services()
+                result["vpn_services"] = vpn_services
 
-            if vpn_services:
-                result["vpn_processes_found"] = True
+                if vpn_services:
+                    result["vpn_processes_found"] = True
+            except Exception as e:
+                logger.debug(f"Error checking VPN services: {e}")
 
             # Set risk level
             if result["vpn_processes_found"]:
                 result["risk_level"] = "high"
                 logger.warning(f"VPN processes detected: {result['detected_processes']}")
-
                 # Store for persistent monitoring
                 self.detected_vpn_processes = result["detected_processes"]
 
@@ -261,15 +280,33 @@ class ChildVPNDNSProtection:
         try:
             if platform.system() == "Windows":
                 # Windows DNS detection
-                result = subprocess.run([
-                    'nslookup', 'google.com'
-                ], capture_output=True, text=True, timeout=5)
+                try:
+                    result = subprocess.run([
+                        'nslookup', 'google.com'
+                    ], capture_output=True, text=True, timeout=5)
 
-                for line in result.stdout.split('\n'):
-                    if 'Server:' in line:
-                        dns_ip = line.split(':')[-1].strip()
-                        if self._is_valid_ip(dns_ip):
-                            dns_servers.append(dns_ip)
+                    for line in result.stdout.split('\n'):
+                        if 'Server:' in line:
+                            parts = line.split(':')
+                            if len(parts) > 1:
+                                dns_ip = parts[-1].strip()
+                                if self._is_valid_ip(dns_ip):
+                                    dns_servers.append(dns_ip)
+                except Exception as e:
+                    logger.debug(f"nslookup method failed: {e}")
+                    # תחלוף: נסה עם PowerShell
+                    try:
+                        result = subprocess.run([
+                            'powershell', '-Command',
+                            'Get-DnsClientServerAddress | Select-Object -ExpandProperty ServerAddresses'
+                        ], capture_output=True, text=True, timeout=10)
+
+                        for line in result.stdout.split('\n'):
+                            dns_ip = line.strip()
+                            if self._is_valid_ip(dns_ip):
+                                dns_servers.append(dns_ip)
+                    except Exception as e2:
+                        logger.debug(f"PowerShell method also failed: {e2}")
 
             elif platform.system() == "Linux":
                 # Linux DNS detection
@@ -277,11 +314,13 @@ class ChildVPNDNSProtection:
                     with open('/etc/resolv.conf', 'r') as f:
                         for line in f:
                             if line.startswith('nameserver'):
-                                dns_ip = line.split()[-1]
-                                if self._is_valid_ip(dns_ip):
-                                    dns_servers.append(dns_ip)
-                except:
-                    pass
+                                parts = line.split()
+                                if len(parts) > 1:
+                                    dns_ip = parts[1]
+                                    if self._is_valid_ip(dns_ip):
+                                        dns_servers.append(dns_ip)
+                except Exception as e:
+                    logger.debug(f"resolv.conf read failed: {e}")
 
                 # Also check systemd-resolved
                 try:
@@ -291,27 +330,40 @@ class ChildVPNDNSProtection:
 
                     for line in result.stdout.split('\n'):
                         if 'DNS Servers:' in line:
-                            dns_ip = line.split(':')[-1].strip()
-                            if self._is_valid_ip(dns_ip):
-                                dns_servers.append(dns_ip)
-                except:
-                    pass
+                            parts = line.split(':')
+                            if len(parts) > 1:
+                                dns_ip = parts[-1].strip()
+                                if self._is_valid_ip(dns_ip):
+                                    dns_servers.append(dns_ip)
+                except Exception as e:
+                    logger.debug(f"systemd-resolve failed: {e}")
 
             elif platform.system() == "Darwin":  # macOS
-                result = subprocess.run([
-                    'scutil', '--dns'
-                ], capture_output=True, text=True, timeout=5)
+                try:
+                    result = subprocess.run([
+                        'scutil', '--dns'
+                    ], capture_output=True, text=True, timeout=5)
 
-                for line in result.stdout.split('\n'):
-                    if 'nameserver[0]' in line:
-                        dns_ip = line.split(':')[-1].strip()
-                        if self._is_valid_ip(dns_ip):
-                            dns_servers.append(dns_ip)
+                    for line in result.stdout.split('\n'):
+                        if 'nameserver[0]' in line:
+                            parts = line.split(':')
+                            if len(parts) > 1:
+                                dns_ip = parts[-1].strip()
+                                if self._is_valid_ip(dns_ip):
+                                    dns_servers.append(dns_ip)
+                except Exception as e:
+                    logger.debug(f"macOS DNS detection failed: {e}")
 
         except Exception as e:
             logger.error(f"DNS detection error: {e}")
 
-        return list(set(dns_servers))  # Remove duplicates
+        # אם לא מצאנו DNS, השתמש בברירת מחדל
+        if not dns_servers:
+            logger.info("No DNS servers detected, using defaults")
+            dns_servers = ["8.8.8.8"]  # ברירת מחדל
+
+        return list(set(dns_servers))
+
 
     def _is_valid_ip(self, ip_str: str) -> bool:
         """Check if string is valid IP address"""

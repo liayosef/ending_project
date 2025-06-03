@@ -1239,21 +1239,21 @@ class ChildClient:
 
                 if msg_type == Protocol.UPDATE_DOMAINS:
                     domains = data.get('domains', [])
-                    logger.info(f"🔥 RECEIVED DOMAIN UPDATE: {domains}")  # <-- שנה מdebug לinfo
+                    logger.info(f"🔥 RECEIVED DOMAIN UPDATE: {domains}")
 
                     global BLOCKED_DOMAINS
                     old_domains = BLOCKED_DOMAINS.copy()
                     BLOCKED_DOMAINS = set(domains)
 
-                    logger.info(f"🔥 OLD DOMAINS: {old_domains}")  # <-- הוסף
-                    logger.info(f"🔥 NEW DOMAINS: {BLOCKED_DOMAINS}")  # <-- שנה מdebug לinfo
+                    logger.info(f"🔥 OLD DOMAINS: {old_domains}")
+                    logger.info(f"🔥 NEW DOMAINS: {BLOCKED_DOMAINS}")
 
                     # If list changed - clear cache
                     if old_domains != BLOCKED_DOMAINS:
-                        logger.info("🔥 DOMAINS CHANGED - CLEARING DNS CACHE")  # <-- הוסף
+                        logger.info("🔥 DOMAINS CHANGED - CLEARING DNS CACHE")
                         clear_dns_cache_when_updated()
                     else:
-                        logger.info("🔥 DOMAINS UNCHANGED - NO CACHE CLEAR")  # <-- הוסף
+                        logger.info("🔥 DOMAINS UNCHANGED - NO CACHE CLEAR")
 
                 elif msg_type == Protocol.CHILD_STATUS:
                     Protocol.send_message(self._main_socket, Protocol.ACK)
@@ -1262,24 +1262,93 @@ class ChildClient:
                     send_history_update()
 
                 elif msg_type == "SECURITY_CHECK_REQUEST":
-                    logger.info(" Security check requested by parent")
-                    if child_security_protection and hasattr(child_security_protection, 'comprehensive_security_check'):
-                        security_result = child_security_protection.comprehensive_security_check()
-                    else:
-                        security_result = {"overall_risk": "low", "threats_detected": []}
+                    logger.info("🔒 Security check requested by parent")
+                    try:
+                        if child_security_protection:
+                            # Use available methods
+                            vpn_result = child_security_protection.detect_vpn_processes()
+                            dns_result = child_security_protection.monitor_dns_configuration()
+
+                            security_result = {
+                                "overall_risk": "low",
+                                "threats_detected": [],
+                                "vpn_check": vpn_result,
+                                "dns_check": dns_result,
+                                "timestamp": time.time()
+                            }
+
+                            # Determine overall risk
+                            threats = []
+                            if vpn_result.get("vpn_processes_found", False):
+                                threats.append("VPN processes detected")
+                                security_result["overall_risk"] = "high"
+
+                            if dns_result.get("forbidden_dns_found", False):
+                                threats.append("Forbidden DNS detected")
+                                security_result["overall_risk"] = "high"
+
+                            if dns_result.get("dns_modified", False):
+                                threats.append("DNS configuration modified")
+                                if security_result["overall_risk"] == "low":
+                                    security_result["overall_risk"] = "medium"
+
+                            security_result["threats_detected"] = threats
+                        else:
+                            security_result = {"overall_risk": "unknown", "threats_detected": []}
+
+                        logger.info(f"🔒 Security check result: {security_result}")
+                    except Exception as e:
+                        logger.error(f"Security check failed: {e}")
+                        security_result = {"overall_risk": "error", "threats_detected": [str(e)]}
+
                     Protocol.send_message(self._main_socket, "SECURITY_CHECK_RESPONSE", security_result)
 
                 elif msg_type == "FORCE_SECURITY_ACTION":
                     action = data.get("action")
-                    logger.critical(f" Forced security action: {action}")
+                    logger.critical(f"🔒 Forced security action: {action}")
 
-                    if child_security_protection and hasattr(child_security_protection, 'kill_vpn_processes'):
-                        if action == "kill_vpn":
-                            result = child_security_protection.kill_vpn_processes()
-                            logger.info(f"Forced VPN kill result: {result}")
-                        elif action == "restore_dns":
-                            result = child_security_protection.attempt_dns_restoration()
-                            logger.info(f"Forced DNS restore result: {result}")
+                    result = False
+                    try:
+                        if child_security_protection:
+                            if action == "kill_vpn":
+                                if hasattr(child_security_protection, 'kill_vpn_processes'):
+                                    result = child_security_protection.kill_vpn_processes()
+                                    logger.info(f"🔒 Forced VPN kill result: {result}")
+                                else:
+                                    logger.warning("VPN kill function not available")
+
+                            elif action == "restore_dns":
+                                if hasattr(child_security_protection, 'attempt_dns_restoration'):
+                                    result = child_security_protection.attempt_dns_restoration()
+                                    logger.info(f"🔒 Forced DNS restore result: {result}")
+                                else:
+                                    logger.warning("DNS restore function not available")
+                                    # Try manual DNS restore
+                                    try:
+                                        dns_manager.restore_original_dns()
+                                        result = True
+                                        logger.info("🔒 Manual DNS restore successful")
+                                    except Exception as dns_error:
+                                        logger.error(f"Manual DNS restore failed: {dns_error}")
+                                        result = False
+                            else:
+                                logger.warning(f"Unknown security action: {action}")
+                        else:
+                            logger.warning("No security protection available")
+
+                    except Exception as e:
+                        logger.error(f"Error executing security action: {e}")
+                        result = False
+
+                    # Send response back to parent
+                    try:
+                        Protocol.send_message(self._main_socket, "SECURITY_ACTION_RESULT", {
+                            "action": action,
+                            "success": result,
+                            "timestamp": time.time()
+                        })
+                    except Exception as e:
+                        logger.error(f"Failed to send security action result: {e}")
 
                 elif msg_type == Protocol.ERROR:
                     logger.error(f"Server error: {data}")
@@ -1295,7 +1364,7 @@ class ChildClient:
 
         logger.info("Stopped listening to parent server")
 
-# Global instances
+
 child_client = ChildClient()
 dns_manager = DNSManager()
 
