@@ -26,6 +26,7 @@ from vpn_dns_protection import VPNDNSProtection
 from typing import Dict, List, Optional, Any
 from html_templates_parent import (REGISTER_TEMPLATE, LOGIN_TEMPLATE, DASHBOARD_TEMPLATE,
                                    BROWSING_HISTORY_TEMPLATE, MANAGE_CHILDREN_TEMPLATE, )
+from database_manager import get_database, initialize_database
 
 # Configure logging
 logging.basicConfig(
@@ -46,6 +47,7 @@ HTTPS_PORT = 8443
 children_data = {}
 data_lock = threading.Lock()
 active_connections = {}
+db = None
 
 # Browsing history storage
 browsing_history = {}  # Dictionary by child name
@@ -55,6 +57,7 @@ history_lock = threading.Lock()
 encryption_system = None
 file_manager = None
 parent_server = None
+
 
 class ParentalControlException(Exception):
     """Base exception for parental control system"""
@@ -220,210 +223,88 @@ MIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQDMQiXPRhmA3O2M
         return False
 
 
-def save_children_data():
-    """
-    Save children data - corrected and encrypted global function.
+def init_database():
+    """Initialize database and migrate data if needed"""
+    global db
+    if db is None:
+        db = initialize_database()
 
-    Returns:
-        bool: True if saved successfully, False otherwise
-    """
-    global children_data
+    # Migrate existing JSON data if exists
+    try:
+        if os.path.exists('children_data.json'):
+            with open('children_data.json', 'r', encoding='utf-8') as f:
+                old_children = json.load(f)
 
-    if file_manager is None:
-        initialize_encryption()
+            for child_name, child_info in old_children.items():
+                # Add child to database
+                db.add_child(child_name)
+
+                # Add blocked domains
+                blocked_domains = child_info.get('blocked_domains', [])
+                for domain in blocked_domains:
+                    db.add_blocked_domain(child_name, domain)
+
+                # Update connection info
+                if child_info.get('last_seen'):
+                    db.update_child_connection(
+                        child_name,
+                        child_info.get('client_address'),
+                        child_info.get('last_seen')
+                    )
+
+            # Backup and remove old file
+            os.rename('children_data.json', 'children_data.json.backup')
+            logger.info("Migrated children data to database")
+
+    except FileNotFoundError:
+        pass
+    except Exception as e:
+        logger.error(f"Error migrating children data: {e}")
 
     try:
-        # Prepare data for saving
-        data_to_save = {}
-        for child, info in children_data.items():
-            blocked_domains = info["blocked_domains"]
-            if isinstance(blocked_domains, set):
-                blocked_domains = list(blocked_domains)
+        if os.path.exists('browsing_history.json'):
+            with open('browsing_history.json', 'r', encoding='utf-8') as f:
+                old_history = json.load(f)
 
-            data_to_save[child] = {
-                "blocked_domains": blocked_domains,
-                "last_seen": info.get("last_seen")
-            }
+            for entry in old_history:
+                child_name = entry.get('child_name')
+                if child_name:
+                    db.add_browsing_history(child_name, [entry])
 
-        # Encrypted save
-        success = file_manager.safe_save_json('children_data.json', data_to_save, encrypted=True)
+            os.rename('browsing_history.json', 'browsing_history.json.backup')
+            logger.info("Migrated browsing history to database")
 
-        if success:
-            logger.info(f"Children data saved encrypted: {len(data_to_save)} children")
-            return True
-        else:
-            raise Exception("Encrypted save failed")
-
+    except FileNotFoundError:
+        pass
     except Exception as e:
-        logger.error(f"Error saving children data: {e}")
-        return False
+        logger.error(f"Error migrating browsing history: {e}")
 
+    return db
 
 def load_children_data():
-    """
-    Load children data - corrected and encrypted global function.
-    """
-    global children_data
-
-    if file_manager is None:
-        initialize_encryption()
-
+    """Compatibility function - loads from database"""
     try:
-        # Try encrypted load first
-        data = file_manager.safe_load_json('children_data.json', encrypted=True)
-
-        if data:
-            for child, info in data.items():
-                info['blocked_domains'] = set(info['blocked_domains'])
-                info.setdefault('client_address', None)
-                info.setdefault('last_seen', None)
-            children_data.update(data)
-            logger.info(f"Children data loaded encrypted: {len(children_data)} children")
-        else:
-            # If no encrypted file, try to load regular and convert
-            try:
-                with open('children_data.json', 'r', encoding='utf-8') as f:
-                    old_data = json.load(f)
-
-                for child, info in old_data.items():
-                    info['blocked_domains'] = set(info['blocked_domains'])
-                    info.setdefault('client_address', None)
-                    info.setdefault('last_seen', None)
-                children_data.update(old_data)
-
-                logger.info("Converting existing children data to encryption...")
-                save_children_data()
-                logger.info("Children data converted to encryption")
-
-            except FileNotFoundError:
-                # Default data
-                children_data.update({
-                    'Child 1': {"blocked_domains": {"facebook.com", "youtube.com"},
-                                "client_address": None, "last_seen": None},
-                    'Child 2': {"blocked_domains": {"instagram.com", "tiktok.com"},
-                                "client_address": None, "last_seen": None},
-                    'Child 3': {"blocked_domains": {"twitter.com"},
-                                "client_address": None, "last_seen": None}
-                })
-                save_children_data()
-                logger.info(f"Default encrypted data created: {len(children_data)} children")
-
+        database = get_database()
+        return database.get_all_children()
     except Exception as e:
         logger.error(f"Error loading children data: {e}")
-        # Emergency data
-        children_data['Child 1'] = {"blocked_domains": set(), "client_address": None, "last_seen": None}
+        return {}
 
 
-def save_browsing_history():
-    """
-    Save browsing history - corrected and encrypted global function.
-
-    Returns:
-        bool: True if saved successfully, False otherwise
-    """
-    global browsing_history
-
-    if file_manager is None:
-        initialize_encryption()
-
-    try:
-        # Encrypted save
-        success = file_manager.safe_save_json('browsing_history.json', browsing_history, encrypted=True)
-
-        if success:
-            total_entries = sum(len(entries) for entries in browsing_history.values())
-            logger.info(f"History saved encrypted: {total_entries} total entries")
-            return True
-        else:
-            raise Exception("Encrypted save failed")
-
-    except Exception as e:
-        logger.error(f"Error saving history: {e}")
-        return False
-
-
-def load_browsing_history():
-    """
-    Load browsing history - corrected and encrypted global function.
-    """
-    global browsing_history
-
-    if file_manager is None:
-        initialize_encryption()
-
-    try:
-        # Try encrypted load first
-        data = file_manager.safe_load_json('browsing_history.json', encrypted=True)
-
-        if data and isinstance(data, dict):
-            browsing_history = data
-            total_entries = sum(len(entries) for entries in browsing_history.values())
-            logger.info(f"History loaded encrypted: {len(browsing_history)} children, {total_entries} total entries")
-        else:
-            # If no encrypted file, try to load regular and convert
-            try:
-                with open('browsing_history.json', 'r', encoding='utf-8') as f:
-                    old_data = json.load(f)
-
-                if old_data and isinstance(old_data, dict):
-                    browsing_history = old_data
-                    logger.info("Converting existing history to encryption...")
-                    save_browsing_history()
-                    logger.info("History converted to encryption")
-
-            except FileNotFoundError:
-                logger.info("No history files found - creating new")
-                browsing_history = {}
-                save_browsing_history()
-
-    except Exception as e:
-        logger.error(f"Error loading history: {e}")
-        browsing_history = {}
+def save_children_data():
+    """Compatibility function - data auto-saved in database"""
+    pass  # Database auto-saves
 
 
 def add_to_browsing_history(child_name, entries):
-    """
-    Add entries to browsing history - corrected global function.
-
-    Args:
-        child_name (str): Name of the child
-        entries (list): List of browsing history entries
-    """
-    global browsing_history
-
-    if not child_name or not entries:
-        logger.error(f"Empty data: child_name='{child_name}', entries={len(entries) if entries else 0}")
-        return
-
-    logger.info(f"Processing history for {child_name}: {len(entries)} new entries")
-
-    with history_lock:
-        try:
-            if child_name not in browsing_history:
-                browsing_history[child_name] = []
-                logger.info(f"Created new list for {child_name}")
-
-            old_count = len(browsing_history[child_name])
-            browsing_history[child_name].extend(entries)
-            new_count = len(browsing_history[child_name])
-
-            logger.info(f"Added {len(entries)} entries. Total: {old_count} → {new_count}")
-
-            if len(browsing_history[child_name]) > 5000:
-                removed = len(browsing_history[child_name]) - 5000
-                browsing_history[child_name] = browsing_history[child_name][-5000:]
-                logger.info(f"Removed {removed} old entries (keeping 5000)")
-
-            try:
-                save_browsing_history()
-                logger.info("History saved to file successfully")
-            except Exception as save_error:
-                logger.error(f"Error saving: {save_error}")
-
-        except Exception as e:
-            logger.error(f"Critical error processing history: {e}")
-            import traceback
-            traceback.print_exc()
+    """Add browsing history using database"""
+    try:
+        database = get_database()
+        if entries:
+            database.add_browsing_history(child_name, entries)
+            logger.info(f"Added {len(entries)} history entries for {child_name}")
+    except Exception as e:
+        logger.error(f"Error adding browsing history: {e}")
 
 
 class BaseManager(ABC):
@@ -471,175 +352,24 @@ class BaseManager(ABC):
         return True
 
 
-class UserManager(BaseManager):
-    """
-    User management class - registration, login and encrypted data storage.
-    """
 
-    def __init__(self, data_file='users_data.json'):
-        """
-        Initialize UserManager with encrypted data file.
+class UserManager:
+    """Database-backed user manager with encryption"""
 
-        Args:
-            data_file (str): Path to user data file
-        """
-        super().__init__("UserManager")
-        self.data_file = data_file
-        self.users = {}
-        self._lock = threading.Lock()
-        self.load_users_encrypted()
-        logger.info("UserManager initialized")
-
-    def load_users_encrypted(self):
-        """Load user data - encrypted version"""
-        if file_manager is None:
-            initialize_encryption()
-
-        try:
-            # Try encrypted load first
-            self.users = file_manager.safe_load_json(self.data_file, encrypted=True)
-
-            if self.users:
-                logger.info(f"Loaded encrypted data for {len(self.users)} users")
-                return
-
-            # If no encrypted file, try regular and convert
-            try:
-                with open(self.data_file, 'r', encoding='utf-8') as f:
-                    self.users = json.load(f)
-                logger.info(f"Loaded data for {len(self.users)} users")
-                # Convert to encryption
-                self.save_users_encrypted()
-                logger.info("User data converted to encryption")
-            except FileNotFoundError:
-                # Create demo user
-                self.users = {
-                    'admin@example.com': {
-                        'fullname': 'System Administrator',
-                        'password_hash': self._hash_password('admin123')
-                    }
-                }
-                self.save_users_encrypted()
-                logger.info("New encrypted user file created")
-        except Exception as e:
-            logger.error(f"Error loading user data: {e}")
-            self.users = {}
-
-    def save_users_encrypted(self):
-        """Save user data - encrypted version"""
-        if file_manager is None:
-            initialize_encryption()
-
-        try:
-            success = file_manager.safe_save_json(self.data_file, self.users, encrypted=True)
-            if success:
-                logger.info("User data saved encrypted")
-            else:
-                logger.error("Error saving encrypted user data")
-        except Exception as e:
-            logger.error(f"Error saving user data: {e}")
-
-    def _hash_password(self, password):
-        """
-        Hash password using SHA-256.
-
-        Args:
-            password (str): Plain text password
-
-        Returns:
-            str: Hashed password
-        """
-        return hashlib.sha256(password.encode('utf-8')).hexdigest()
+    def __init__(self):
+        self.db = get_database()
+        # אין צורך בהצפנה נפרדת - הדאטהבייס עושה הכל
 
     def register_user(self, email, fullname, password):
-        """
-        Register new user.
-
-        Args:
-            email (str): User email address
-            fullname (str): User full name
-            password (str): User password
-
-        Returns:
-            tuple: (success: bool, message: str)
-        """
-        if not email or not fullname or not password:
-            return False, "All fields must be filled"
-
-        if email in self.users:
-            return False, "Email address already exists in system"
-
-        if len(password) < 6:
-            return False, "Password must contain at least 6 characters"
-
-        # Add user
-        self.users[email] = {
-            'fullname': fullname,
-            'password_hash': self._hash_password(password)
-        }
-
-        self.save_users_encrypted()
-        logger.info(f"New user registered: {email}")
-        return True, "User registered successfully"
+        # DatabaseManager כבר מבצע hashing וcצפנה
+        return self.db.register_user(email, fullname, password)
 
     def validate_login(self, email, password):
-        """
-        Validate user login.
-
-        Args:
-            email (str): User email
-            password (str): User password
-
-        Returns:
-            bool: True if login valid, False otherwise
-        """
-        if email not in self.users:
-            return False
-
-        password_hash = self._hash_password(password)
-        return self.users[email]['password_hash'] == password_hash
+        # DatabaseManager כבר מבצע hashing ובדיקה
+        return self.db.validate_login(email, password)
 
     def get_user_fullname(self, email):
-        """
-        Get user full name.
-
-        Args:
-            email (str): User email
-
-        Returns:
-            str or None: User full name or None if not found
-        """
-        if email in self.users:
-            return self.users[email]['fullname']
-        return None
-
-    def initialize(self) -> bool:
-        """Initialize user manager"""
-        try:
-            self.load_users_encrypted()
-            self.is_initialized = True
-            return True
-        except Exception as e:
-            self.logger.error(f"Failed to initialize: {e}")
-            return False
-
-    def cleanup(self) -> bool:
-        """Cleanup user manager"""
-        try:
-            self.save_users_encrypted()
-            return True
-        except Exception as e:
-            self.logger.error(f"Cleanup error: {e}")
-            return False
-
-    def get_user_info(self, email) -> Optional[Dict]:
-        """Get complete user information"""
-        with self._lock:
-            if email in self.users:
-                user_info = self.users[email].copy()
-                user_info.pop('password_hash', None)
-                return user_info
-            return None
+        return self.db.get_user_fullname(email)
 
 
 class ParentServer(BaseManager):
@@ -651,6 +381,7 @@ class ParentServer(BaseManager):
         """Initialize parent server with encrypted data loading."""
         super().__init__("ParentServer")
         self.running = True
+        self.db = get_database()
         self.server_socket = None
         self.connection_threads = []
         self.threads_lock = threading.Lock()
@@ -658,9 +389,14 @@ class ParentServer(BaseManager):
         self.vpn_dns_protection = VPNDNSProtection()
         self.vpn_dns_protection.start_monitoring(check_interval=60)  # בדיקה כל דקה
 
-        # Load encrypted data
-        load_children_data()
-        load_browsing_history()
+        global db
+        if not db:
+            init_database()
+
+        # Load children data into memory for compatibility
+        global children_data
+        children_data = self.db.get_all_children()
+
 
         # Start periodic save
         self.start_periodic_save()
@@ -692,54 +428,33 @@ class ParentServer(BaseManager):
             while self.running:
                 try:
                     time.sleep(30)
-                    save_browsing_history()
+                    # Database auto-saves, but we can do maintenance here
+                    if db:
+                        # Optional: cleanup old data
+                        try:
+                            from database_manager import cleanup_old_data
+                            cleanup_old_data(days_to_keep=30)
+                        except:
+                            pass
                 except Exception as e:
-                    logger.error(f"Error in periodic save: {e}")
+                    logger.error(f"Error in periodic maintenance: {e}")
 
         save_thread = threading.Thread(target=save_periodically, daemon=True, name="PeriodicSaver")
         save_thread.start()
         logger.info("Periodic save started")
 
     def add_child(self, child_name):
-        """
-        Add new child to system.
+        if not self.db.add_child(child_name):
+            return False
 
-        Args:
-            child_name (str): Name of child to add
-
-        Returns:
-            bool: True if child added successfully, False otherwise
-        """
-        logger.debug(f"Trying to add child: '{child_name}'")
-
-        if not child_name or not child_name.strip():
-            raise DataValidationError("Child name cannot be empty")
-
-        child_name = child_name.strip()
-
+        # Update memory for compatibility
         with data_lock:
-            if child_name in children_data:
-                logger.debug(f"Child '{child_name}' already exists")
-                return False
-
             children_data[child_name] = {
                 "blocked_domains": set(),
                 "client_address": None,
-                "last_seen": None,
-                "created_at": time.time()
+                "last_seen": None
             }
-
-            logger.debug(f"Child '{child_name}' added to dictionary")
-            logger.debug(f"Now have {len(children_data)} children")
-
-            try:
-                save_children_data()
-                logger.info(f"Child '{child_name}' added successfully and saved")
-                return True
-            except Exception as e:
-                logger.error(f"Error saving new child: {e}")
-                del children_data[child_name]
-                return False
+        return True
 
     def notify_child_immediate(self, child_name: str) -> None:
         """
@@ -769,46 +484,16 @@ class ParentServer(BaseManager):
                         logger.error(f"Error in encrypted update {child_name}: {e}")
 
     def remove_child(self, child_name):
-        """
-        Remove child from system.
-
-        Args:
-            child_name (str): Name of child to remove
-
-        Returns:
-            bool: True if child removed successfully, False otherwise
-        """
-        logger.debug(f"Trying to remove child: '{child_name}'")
-
-        if not child_name or not child_name.strip():
-            logger.debug("Empty child name")
+        """Remove child using database"""
+        # Use the class database instance
+        if not self.db.remove_child(child_name):
             return False
 
-        child_name = child_name.strip()
-
+        # Update memory for compatibility
         with data_lock:
-            if child_name not in children_data:
-                logger.debug(f"Child '{child_name}' does not exist")
-                return False
-
-            # Remove child
-            del children_data[child_name]
-
-            # Remove their history
-            with history_lock:
-                if child_name in browsing_history:
-                    del browsing_history[child_name]
-
-            logger.debug(f"Child '{child_name}' removed from dictionary")
-
-            try:
-                save_children_data()
-                save_browsing_history()
-                logger.info(f"Child '{child_name}' removed successfully")
-                return True
-            except Exception as e:
-                logger.error(f"Error saving after removal: {e}")
-                return False
+            if child_name in children_data:
+                del children_data[child_name]
+        return True
 
     def send_security_alert(self, security_result):
         """Send security alert to parent dashboard"""
@@ -823,17 +508,20 @@ class ParentServer(BaseManager):
             "actions_taken": security_result["actions_taken"]
         }
 
-        # הוסף לרשימת התראות אבטחה
-        with history_lock:
-            if "security_alerts" not in browsing_history:
-                browsing_history["security_alerts"] = []
+        # שמור התראת אבטחה בדאטהבייס
+        if self.db:
+            try:
+                self.db.add_security_alert(
+                    client_ip=security_result["client_ip"],
+                    risk_level=security_result["overall_risk"],
+                    alert_type="SECURITY_ALERT",
+                    details=alert_data
+                )
+                logger.info("Security alert saved to database")
+            except Exception as e:
+                logger.error(f"Error saving security alert: {e}")
 
-            browsing_history["security_alerts"].append(alert_data)
-
-            # שמור את ההיסטוריה המעודכנת
-            save_browsing_history()
-
-        logger.critical(f"🔒 SECURITY ALERT LOGGED: {alert_data}")
+        logger.critical(f" SECURITY ALERT LOGGED: {alert_data}")
 
         # שלח התראה מיידית לממשק האינטרנט (אם יש חיבור פעיל)
         self._broadcast_security_alert(alert_data)
@@ -861,7 +549,7 @@ class ParentServer(BaseManager):
         security_result = self.vpn_dns_protection.check_client_security(client_ip)
 
         if security_result["overall_risk"] == "high":
-            logger.critical(f"🚨 HIGH SECURITY RISK from {client_ip}")
+            logger.critical(f" HIGH SECURITY RISK from {client_ip}")
             logger.critical(f"VPN detected: {security_result['vpn_check'].get('vpn_detected', False)}")
             logger.critical(f"DNS issues: {security_result['dns_check'].get('issues', [])}")
 
@@ -996,7 +684,7 @@ class ParentServer(BaseManager):
                         logger.debug("Adding encrypted history to database...")
                         add_to_browsing_history(child_name_from_data, history_entries)
 
-                        Protocol.send_message(client_socket, Protocol.ACK)
+                        Protocol.send_message(client_socket, Protocol.ACK) #type:ignore
                         logger.info(f"Encrypted history from {child_name} processed successfully and ACK sent")
 
                     except Exception as history_error:
@@ -1079,11 +767,10 @@ class ParentServer(BaseManager):
         logger.info(f"Disconnected {disconnected} children")
 
         try:
-            save_children_data()
-            save_browsing_history()
-            logger.info("Encrypted data saved")
+            # Database auto-saves, but let's make sure
+            logger.info("Database auto-saved")
         except Exception as e:
-            logger.error(f"Error saving data: {e}")
+            logger.error(f"Error during shutdown: {e}")
 
         logger.info("Parent server shutdown completed")
 
@@ -1106,38 +793,24 @@ class ParentServer(BaseManager):
             return False
 
     def add_blocked_domain(self, child_name: str, domain: str) -> bool:
-        """Add blocked domain with validation"""
-        if not child_name or not domain:
-            raise DataValidationError("Child name and domain cannot be empty")
+        if not self.db.add_blocked_domain(child_name, domain):  # <-- self.db
+            return False
 
-        domain = domain.strip().lower()
-
+        # Update memory for compatibility
         with data_lock:
-            if child_name not in children_data:
-                raise DataValidationError(f"Child '{child_name}' does not exist")
-
-            children_data[child_name]['blocked_domains'].add(domain)
-            save_children_data()
-            self.logger.info(f"Domain '{domain}' added to '{child_name}'")
-            return True
+            if child_name in children_data:
+                children_data[child_name]['blocked_domains'].add(domain)
+        return True
 
     def remove_blocked_domain(self, child_name: str, domain: str) -> bool:
-        """Remove blocked domain with validation"""
-        if not child_name or not domain:
-            raise DataValidationError("Child name and domain cannot be empty")
-
-        domain = domain.strip().lower()
-
-        with data_lock:
-            if child_name not in children_data:
-                raise DataValidationError(f"Child '{child_name}' does not exist")
-
-            if domain in children_data[child_name]['blocked_domains']:
-                children_data[child_name]['blocked_domains'].remove(domain)
-                save_children_data()
-                self.logger.info(f"Domain '{domain}' removed from '{child_name}'")
-                return True
+        if not self.db.remove_blocked_domain(child_name, domain):  # <-- self.db
             return False
+
+        # Update memory for compatibility
+        with data_lock:
+            if child_name in children_data:
+                children_data[child_name]['blocked_domains'].discard(domain)
+        return True
 
 
 class ParentHandler(http.server.SimpleHTTPRequestHandler):
@@ -1500,29 +1173,23 @@ class ParentHandler(http.server.SimpleHTTPRequestHandler):
                     selected = 'selected' if child_name == child_filter else ''
                     children_options.append(f'<option value="{child_name}" {selected}>{child_name}</option>')
 
-            # Filter and display history
-            filtered_history = []
-            with history_lock:
-                for child_name, entries in browsing_history.items():
-                    if child_filter and child_name != child_filter:
-                        continue
+            # ✅ קבל היסטוריה ישירות מדטבייס עם פילטרים
+            try:
+                database = get_database()
+                filtered_history = database.get_browsing_history(
+                    child_filter=child_filter if child_filter else None,
+                    status_filter=status_filter if status_filter else None,
+                    domain_filter=domain_filter if domain_filter else None,
+                    limit=200
+                )
 
-                    for entry in entries:
-                        # Filter by status
-                        if status_filter == 'blocked' and not entry.get('was_blocked', False):
-                            continue
-                        if status_filter == 'allowed' and entry.get('was_blocked', False):
-                            continue
+                logger.info(f"Retrieved {len(filtered_history)} history entries from database")
 
-                        # Filter by domain
-                        if domain_filter and domain_filter.lower() not in entry.get('domain', '').lower():
-                            continue
-
-                        filtered_history.append(entry)
-
-            # Sort by time (newest first)
-            filtered_history.sort(key=lambda x: x.get('timestamp', ''), reverse=True)
-            filtered_history = filtered_history[:200]
+            except Exception as e:
+                logger.error(f"Error getting history from database: {e}")
+                import traceback
+                traceback.print_exc()
+                filtered_history = []
 
             # Group history
             grouped_history = group_browsing_by_main_site(filtered_history, time_window_minutes=30)
@@ -1569,13 +1236,12 @@ class ParentHandler(http.server.SimpleHTTPRequestHandler):
                 history_html = history_html.replace('${history_entries}', ''.join(history_entries))
             else:
                 history_html = history_html.replace('${history_entries}',
-                                                    '<div class="empty-message">No records matching search</div>')
+                                                    '<div class="empty-message">אין רשומות התואמות לחיפוש</div>')
 
             self.send_response(200)
             self.send_header('Content-type', 'text/html; charset=utf-8')
             self.end_headers()
             self.wfile.write(history_html.encode('utf-8'))
-
         elif parsed_path.path == '/manage_children':
             logged_in_user = self.is_logged_in()
             if not logged_in_user:
@@ -1897,11 +1563,13 @@ class ParentHandler(http.server.SimpleHTTPRequestHandler):
             logger.debug(f"Request to clear history for: '{child_name}'")
 
             if child_name:
-                with history_lock:
-                    if child_name in browsing_history:
-                        del browsing_history[child_name]
-                        save_browsing_history()
-                        logger.info(f"History for '{child_name}' cleared successfully")
+                try:
+                    database = get_database()
+                    success = database.clear_child_history(child_name)
+                    if success:
+                        logger.info(f"History cleared for {child_name}")
+                except Exception as e:
+                    logger.error(f"Error clearing history: {e}")
 
             self.send_response(302)
             self.send_header('Location', '/browsing_history')
@@ -2074,7 +1742,7 @@ user_manager = UserManager()
 if __name__ == "__main__":
     logger.info("Starting encrypted parental control server...")
     print("=" * 50)
-
+    init_database()
     initialize_encryption()
 
     try:
@@ -2085,7 +1753,7 @@ if __name__ == "__main__":
         logger.info("Server initialized successfully!")
 
         logger.info("Synchronized encryption system ready!")
-        logger.info(f"{len(user_manager.users)} users registered")
+        logger.info("Users system ready (database-backed)")
         logger.info(f"{len(children_data)} children in system")
         logger.info("Encrypted communication with children")
         logger.info("Starting encrypted parental control server with HTTPS")

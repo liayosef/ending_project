@@ -53,6 +53,7 @@ except ImportError:
     logger.warning("HTTPS module not available - HTTP only")
 
 # Configuration Constants
+last_sent_history_count = 0
 REGISTRATION_FILE = "child_registration.json"
 REGISTRATION_CHECK_INTERVAL = 30
 CHILD_NAME = None
@@ -72,6 +73,7 @@ REGISTRATION_PORT = 80  # Registration page port
 BLOCK_PORT = 8080  # Block pages port
 HTTPS_BLOCK_PORT = 8443
 child_security_protection = None
+
 # Domain visit tracking within time window
 domain_visits = defaultdict(list)
 domain_visits_lock = threading.Lock()
@@ -181,7 +183,7 @@ def stop_security_protection():
     """Stop security protection"""
     global child_security_protection
 
-    if child_security_protection:
+    if child_security_protection and hasattr(child_security_protection, 'stop_monitoring'):
         try:
             child_security_protection.stop_monitoring()
             logger.info(" Security protection stopped")
@@ -767,33 +769,33 @@ def add_to_history(domain, timestamp, was_blocked=False):
 
 
 def send_history_update():
-    """
-    Send browsing history update to parent server.
-    Only sends if child is connected and has history entries.
-    """
-    logger.debug(f"child_client.connected = {getattr(child_client, 'connected', 'Unknown')}")
-    logger.debug(f"browsing_history length = {len(browsing_history)}")
-    logger.debug(f"CHILD_NAME = {CHILD_NAME}")
+    """Send browsing history update to parent server."""
+    global last_sent_history_count
 
     if hasattr(child_client, 'connected') and child_client.connected and browsing_history:
         try:
-            logger.debug("Conditions met - sending history...")
             with history_lock:
-                recent_history = browsing_history.copy()
-            data = {"child_name": CHILD_NAME, "history": recent_history}
-            logger.debug(f"Data to send: {len(recent_history)} entries")
+                # שלח רק רשומות חדשות!
+                if not hasattr(send_history_update, 'last_sent_count'):
+                    send_history_update.last_sent_count = 0
 
-            Protocol.send_message(child_client.sock, Protocol.BROWSING_HISTORY, data)
-            logger.info(f"History update sent to server: {len(recent_history)} entries")
+                # רק הרשומות החדשות
+                new_history = browsing_history[send_history_update.last_sent_count:]
+
+                if new_history:  # רק אם יש רשומות חדשות
+                    data = {"child_name": CHILD_NAME, "history": new_history}
+                    Protocol.send_message(child_client.sock, Protocol.BROWSING_HISTORY, data)  #type:ignore
+                    logger.info(f"History update sent to server: {len(new_history)} NEW entries")
+
+                    # עדכן מונה
+                    send_history_update.last_sent_count = len(browsing_history)
+                else:
+                    logger.debug("No new history to send")
+
         except Exception as e:
             logger.error(f"Error sending history: {e}")
-            import traceback
-            traceback.print_exc()
     else:
-        logger.debug("Conditions not met:")
-        logger.debug(f"- connected: {hasattr(child_client, 'connected') and child_client.connected}")
-        logger.debug(f"- history: {len(browsing_history)} entries")
-
+        logger.debug("Cannot send history - not connected or no history")
 
 def clear_dns_cache():
     """
@@ -1148,10 +1150,10 @@ class ChildClient:
                 self._main_socket.connect((PARENT_SERVER_IP, COMMUNICATION_PORT))
 
                 register_data = {"name": self.child_name}
-                Protocol.send_message(self._main_socket, Protocol.REGISTER_CHILD, register_data)
+                Protocol.send_message(self._main_socket, Protocol.REGISTER_CHILD, register_data) #type:ignore
 
                 self._main_socket.settimeout(5)
-                msg_type, _ = Protocol.receive_message(self._main_socket)
+                msg_type, _ = Protocol.receive_message(self._main_socket) #type:ignore
 
                 if msg_type == Protocol.ACK:
                     self.connected = True
@@ -1228,10 +1230,7 @@ class ChildClient:
             time.sleep(3)
 
     def listen_for_updates(self):
-        """
-        Listen for updates from parent server.
-        Handles domain updates, status requests, and error messages.
-        """
+        """Listen for updates from parent server."""
         logger.info("Started listening for server updates...")
         while self.connected and self.keep_running:
             try:
@@ -1240,15 +1239,21 @@ class ChildClient:
 
                 if msg_type == Protocol.UPDATE_DOMAINS:
                     domains = data.get('domains', [])
-                    logger.debug(f"Received domain update: {domains}")
+                    logger.info(f"🔥 RECEIVED DOMAIN UPDATE: {domains}")  # <-- שנה מdebug לinfo
+
                     global BLOCKED_DOMAINS
-                    old_domains = BLOCKED_DOMAINS.copy()  # Save old list
+                    old_domains = BLOCKED_DOMAINS.copy()
                     BLOCKED_DOMAINS = set(domains)
-                    logger.debug(f"BLOCKED_DOMAINS now: {BLOCKED_DOMAINS}")
+
+                    logger.info(f"🔥 OLD DOMAINS: {old_domains}")  # <-- הוסף
+                    logger.info(f"🔥 NEW DOMAINS: {BLOCKED_DOMAINS}")  # <-- שנה מdebug לinfo
 
                     # If list changed - clear cache
                     if old_domains != BLOCKED_DOMAINS:
+                        logger.info("🔥 DOMAINS CHANGED - CLEARING DNS CACHE")  # <-- הוסף
                         clear_dns_cache_when_updated()
+                    else:
+                        logger.info("🔥 DOMAINS UNCHANGED - NO CACHE CLEAR")  # <-- הוסף
 
                 elif msg_type == Protocol.CHILD_STATUS:
                     Protocol.send_message(self._main_socket, Protocol.ACK)
@@ -1258,16 +1263,17 @@ class ChildClient:
 
                 elif msg_type == "SECURITY_CHECK_REQUEST":
                     logger.info(" Security check requested by parent")
-                    if child_security_protection:
+                    if child_security_protection and hasattr(child_security_protection, 'comprehensive_security_check'):
                         security_result = child_security_protection.comprehensive_security_check()
-                        Protocol.send_message(self._main_socket, "SECURITY_CHECK_RESPONSE", security_result)
+                    else:
+                        security_result = {"overall_risk": "low", "threats_detected": []}
+                    Protocol.send_message(self._main_socket, "SECURITY_CHECK_RESPONSE", security_result)
 
                 elif msg_type == "FORCE_SECURITY_ACTION":
-                    # ההורה מבקש פעולת אבטחה מיידית
                     action = data.get("action")
                     logger.critical(f" Forced security action: {action}")
 
-                    if child_security_protection:
+                    if child_security_protection and hasattr(child_security_protection, 'kill_vpn_processes'):
                         if action == "kill_vpn":
                             result = child_security_protection.kill_vpn_processes()
                             logger.info(f"Forced VPN kill result: {result}")
@@ -1289,22 +1295,13 @@ class ChildClient:
 
         logger.info("Stopped listening to parent server")
 
-
 # Global instances
 child_client = ChildClient()
 dns_manager = DNSManager()
 
 
 def is_blocked_domain(query_name):
-    """
-    Check if a domain should be blocked.
-
-    Args:
-        query_name (str): Domain name to check
-
-    Returns:
-        bool: True if domain should be blocked, False otherwise
-    """
+    """Check if a domain should be blocked."""
     # If child not registered - block everything!
     if not CHILD_NAME:
         logger.debug(f"Child not registered - blocking all: {query_name}")
@@ -1325,50 +1322,47 @@ def is_blocked_domain(query_name):
     original_query = query_name
     query_name = query_name.lower().strip('.')
 
-    logger.debug(f"Checking domain: '{original_query}' -> '{query_name}'")
-    logger.debug(f"Blocked list: {BLOCKED_DOMAINS}")
+    logger.info(f" CHECKING: '{original_query}' -> '{query_name}'")  # <-- הוסף
+    logger.info(f" BLOCKED LIST: {BLOCKED_DOMAINS}")  # <-- הוסף
 
-    # Extract main domain (for comparison with zoom.us vs zoom.com)
+    # Extract main domain parts
     main_domain_parts = query_name.split('.')
 
     for blocked_domain in BLOCKED_DOMAINS:
         blocked_domain = blocked_domain.lower().strip('.')
         blocked_parts = blocked_domain.split('.')
 
-        logger.debug(f"Comparing {query_name} with {blocked_domain}")
+        logger.info(f" COMPARING {query_name} with {blocked_domain}")  # <-- הוסף
 
         # 1. Exact match
         if query_name == blocked_domain:
-            logger.debug(f"Exact match: {query_name}")
+            logger.info(f" EXACT MATCH BLOCKED: {query_name}")  # <-- הוסף
             return True
 
-        # 2. Regular subdomain (subdomain.domain.com)
+        # 2. Regular subdomain
         if query_name.endswith('.' + blocked_domain):
-            logger.debug(f"Subdomain: {query_name}")
+            logger.info(f" SUBDOMAIN BLOCKED: {query_name}")  # <-- הוסף
             return True
 
         # 3. Handle www
         if query_name == 'www.' + blocked_domain:
-            logger.debug(f"www of blocked domain: {query_name}")
+            logger.info(f" WWW BLOCKED: {query_name}")  # <-- הוסף
             return True
 
-        # 4. Block by site name (zoom.com vs zoom.us)
+        # 4. Block by site name
         if len(blocked_parts) >= 2 and len(main_domain_parts) >= 2:
-            # Compare main part (zoom vs zoom)
-            if (blocked_parts[0] == main_domain_parts[0] and
-                    len(blocked_parts[0]) > 3):  # Only sites with unique name
-                logger.debug(f"Similar site name: {main_domain_parts[0]} (based on {blocked_parts[0]})")
+            if (blocked_parts[0] == main_domain_parts[0] and len(blocked_parts[0]) > 3):
+                logger.info(f" SITE NAME BLOCKED: {main_domain_parts[0]}")  # <-- הוסף
                 return True
 
-        # 5. Related domains (cdninstagram.com <- instagram.com)
-        blocked_name = blocked_parts[0]  # "instagram"
+        # 5. Related domains
+        blocked_name = blocked_parts[0]
         if blocked_name in query_name and len(blocked_name) > 4:
-            logger.debug(f"Related domain: {query_name} contains {blocked_name}")
+            logger.info(f" RELATED DOMAIN BLOCKED: {query_name} contains {blocked_name}")  # <-- הוסף
             return True
 
-    logger.debug(f"{query_name} allowed")
+    logger.info(f" ALLOWED: {query_name}")  # <-- הוסף
     return False
-
 
 def handle_dns_request(data, addr, sock):
     """
