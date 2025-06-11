@@ -1,0 +1,10 @@
+{
+  "admin@example.com": {
+    "fullname": "מנהל המערכת",
+    "password_hash": "240be518fabd2724ddb6f04eeb1da5967448d7e831c08c8fa822809f74c720a9"
+  },
+  "lia2011.07@gmail.com": {
+    "fullname": "lia",
+    "password_hash": "843d89e452b5addfe1a649d8287b5c6888b861edd44790d4deb980b0cc20fd8d"
+  }
+}
