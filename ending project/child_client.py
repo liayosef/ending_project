@@ -18,6 +18,8 @@ from protocol import Protocol, COMMUNICATION_PORT
 import socket
 from datetime import datetime
 import webbrowser
+import psutil
+import hashlib
 from html_templats_child import (
     REGISTRATION_HTML_TEMPLATE,
     BLOCK_HTML_TEMPLATE,
@@ -25,8 +27,6 @@ from html_templats_child import (
     create_success_page
 )
 from custom_http_server import ParentalControlHTTPServer
-import psutil
-import hashlib
 from child_vpn_dns_protection import ChildVPNDNSProtection
 
 
@@ -61,7 +61,7 @@ REAL_DNS_SERVER = "8.8.8.8"
 LISTEN_IP = "0.0.0.0"
 LISTEN_PORT = 53
 BLOCK_PAGE_IP = "127.0.0.1"
-PARENT_SERVER_IP = "127.0.0.1"
+PARENT_SERVER_IP = "192.168.1.111"
 BLOCKED_DOMAINS = set()
 ORIGINAL_DNS = None
 BLOCK_SERVER_PORT = None
@@ -797,6 +797,7 @@ def send_history_update():
     else:
         logger.debug("Cannot send history - not connected or no history")
 
+
 def clear_dns_cache():
     """
     Clear Windows DNS cache to ensure fresh lookups.
@@ -1109,6 +1110,7 @@ def clear_dns_cache_when_updated():
         logger.error(f"Error clearing cache: {e}")
 
 
+
 class ChildClient:
     """
     Client for communication with parent server.
@@ -1239,21 +1241,21 @@ class ChildClient:
 
                 if msg_type == Protocol.UPDATE_DOMAINS:
                     domains = data.get('domains', [])
-                    logger.info(f"🔥 RECEIVED DOMAIN UPDATE: {domains}")
+                    logger.info(f" RECEIVED DOMAIN UPDATE: {domains}")
 
                     global BLOCKED_DOMAINS
                     old_domains = BLOCKED_DOMAINS.copy()
                     BLOCKED_DOMAINS = set(domains)
 
-                    logger.info(f"🔥 OLD DOMAINS: {old_domains}")
-                    logger.info(f"🔥 NEW DOMAINS: {BLOCKED_DOMAINS}")
+                    logger.info(f" OLD DOMAINS: {old_domains}")
+                    logger.info(f" NEW DOMAINS: {BLOCKED_DOMAINS}")
 
                     # If list changed - clear cache
                     if old_domains != BLOCKED_DOMAINS:
-                        logger.info("🔥 DOMAINS CHANGED - CLEARING DNS CACHE")
+                        logger.info(" DOMAINS CHANGED - CLEARING DNS CACHE")
                         clear_dns_cache_when_updated()
                     else:
-                        logger.info("🔥 DOMAINS UNCHANGED - NO CACHE CLEAR")
+                        logger.info(" DOMAINS UNCHANGED - NO CACHE CLEAR")
 
                 elif msg_type == Protocol.CHILD_STATUS:
                     Protocol.send_message(self._main_socket, Protocol.ACK)
@@ -1391,8 +1393,8 @@ def is_blocked_domain(query_name):
     original_query = query_name
     query_name = query_name.lower().strip('.')
 
-    logger.info(f" CHECKING: '{original_query}' -> '{query_name}'")  # <-- הוסף
-    logger.info(f" BLOCKED LIST: {BLOCKED_DOMAINS}")  # <-- הוסף
+    logger.info(f" CHECKING: '{original_query}' -> '{query_name}'")
+    logger.info(f" BLOCKED LIST: {BLOCKED_DOMAINS}")
 
     # Extract main domain parts
     main_domain_parts = query_name.split('.')
@@ -1401,37 +1403,38 @@ def is_blocked_domain(query_name):
         blocked_domain = blocked_domain.lower().strip('.')
         blocked_parts = blocked_domain.split('.')
 
-        logger.info(f" COMPARING {query_name} with {blocked_domain}")  # <-- הוסף
+        logger.info(f" COMPARING {query_name} with {blocked_domain}")
 
         # 1. Exact match
         if query_name == blocked_domain:
-            logger.info(f" EXACT MATCH BLOCKED: {query_name}")  # <-- הוסף
+            logger.info(f" EXACT MATCH BLOCKED: {query_name}")
             return True
 
         # 2. Regular subdomain
         if query_name.endswith('.' + blocked_domain):
-            logger.info(f" SUBDOMAIN BLOCKED: {query_name}")  # <-- הוסף
+            logger.info(f" SUBDOMAIN BLOCKED: {query_name}")
             return True
 
         # 3. Handle www
         if query_name == 'www.' + blocked_domain:
-            logger.info(f" WWW BLOCKED: {query_name}")  # <-- הוסף
+            logger.info(f" WWW BLOCKED: {query_name}")
             return True
 
         # 4. Block by site name
         if len(blocked_parts) >= 2 and len(main_domain_parts) >= 2:
             if (blocked_parts[0] == main_domain_parts[0] and len(blocked_parts[0]) > 3):
-                logger.info(f" SITE NAME BLOCKED: {main_domain_parts[0]}")  # <-- הוסף
+                logger.info(f" SITE NAME BLOCKED: {main_domain_parts[0]}")
                 return True
 
         # 5. Related domains
         blocked_name = blocked_parts[0]
         if blocked_name in query_name and len(blocked_name) > 4:
-            logger.info(f" RELATED DOMAIN BLOCKED: {query_name} contains {blocked_name}")  # <-- הוסף
+            logger.info(f" RELATED DOMAIN BLOCKED: {query_name} contains {blocked_name}")
             return True
 
-    logger.info(f" ALLOWED: {query_name}")  # <-- הוסף
+    logger.info(f" ALLOWED: {query_name}")
     return False
+
 
 def handle_dns_request(data, addr, sock):
     """

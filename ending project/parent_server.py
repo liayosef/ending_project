@@ -1,32 +1,33 @@
-import logging
-import sys
+import datetime
 import http.server
-import socketserver
-import json
-import threading
-import socket
-from datetime import timezone
 import ipaddress
+import json
+import logging
 import os
-import time
-from history_utils import group_browsing_by_main_site, format_simple_grouped_entry
-import webbrowser
-import hashlib
-from urllib.parse import parse_qs, urlparse, quote, unquote
-from protocol import Protocol, COMMUNICATION_PORT
+import socket
+import socketserver
 import ssl
-from encryption_module import SimpleEncryption, SafeFileManager
+import sys
+import threading
+import time
+import webbrowser
+from abc import ABC, abstractmethod
+from datetime import timezone
+from typing import Optional
+from urllib.parse import parse_qs, urlparse, quote, unquote
+
 from cryptography import x509
-from cryptography.x509.oid import NameOID
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
-import datetime
-from abc import ABC, abstractmethod
-from vpn_dns_protection import VPNDNSProtection
-from typing import Dict, List, Optional, Any
+from cryptography.x509.oid import NameOID
+
+from database_manager import get_database, initialize_database
+from encryption_module import SimpleEncryption, SafeFileManager
+from history_utils import group_browsing_by_main_site, format_simple_grouped_entry
 from html_templates_parent import (REGISTER_TEMPLATE, LOGIN_TEMPLATE, DASHBOARD_TEMPLATE,
                                    BROWSING_HISTORY_TEMPLATE, MANAGE_CHILDREN_TEMPLATE, )
-from database_manager import get_database, initialize_database
+from protocol import Protocol, COMMUNICATION_PORT
+from vpn_dns_protection import VPNDNSProtection
 
 # Configure logging
 logging.basicConfig(
@@ -79,6 +80,7 @@ class ConnectionError(ParentalControlException):
 class DataValidationError(ParentalControlException):
     """Data validation errors"""
     pass
+
 
 def ensure_encryption():
     """
@@ -281,6 +283,7 @@ def init_database():
 
     return db
 
+
 def load_children_data():
     """Compatibility function - loads from database"""
     try:
@@ -311,6 +314,7 @@ class BaseManager(ABC):
     """Abstract base class for all manager classes"""
 
     def __init__(self, name: str):
+        self.running = None
         self.name = name
         self.logger = logging.getLogger(f"{__name__}.{name}")
         self.is_initialized = False
@@ -339,7 +343,6 @@ class BaseManager(ABC):
         """Stop parent server with VPN/DNS protection cleanup"""
         logger.info("Stopping parent server...")
 
-        # עצור ניטור VPN/DNS
         if hasattr(self, 'vpn_dns_protection'):
             self.vpn_dns_protection.stop_monitoring()
             self.running = False
@@ -350,7 +353,6 @@ class BaseManager(ABC):
             self.logger.info(f"{self.name} stopped")
             return result
         return True
-
 
 
 class UserManager:
@@ -387,7 +389,7 @@ class ParentServer(BaseManager):
         self.threads_lock = threading.Lock()
 
         self.vpn_dns_protection = VPNDNSProtection()
-        self.vpn_dns_protection.start_monitoring(check_interval=60)  # בדיקה כל דקה
+        self.vpn_dns_protection.start_monitoring(check_interval=60)
 
         global db
         if not db:
@@ -553,10 +555,8 @@ class ParentServer(BaseManager):
             logger.critical(f"VPN detected: {security_result['vpn_check'].get('vpn_detected', False)}")
             logger.critical(f"DNS issues: {security_result['dns_check'].get('issues', [])}")
 
-            # שלח התראת אבטחה לממשק ההורה
             self.send_security_alert(security_result)
 
-            # סגור חיבור
             try:
                 client_socket.close()
             except:
@@ -564,7 +564,7 @@ class ParentServer(BaseManager):
             return
 
         elif security_result["overall_risk"] == "medium":
-            logger.warning(f"⚠️ MEDIUM SECURITY RISK from {client_ip}")
+            logger.warning(f" MEDIUM SECURITY RISK from {client_ip}")
             self.send_security_alert(security_result)
 
         logger.info(f"New connection from {address}")
@@ -709,13 +709,14 @@ class ParentServer(BaseManager):
         def run_server():
             self.server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             self.server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-            self.server_socket.bind(('', COMMUNICATION_PORT))
+            self.server_socket.bind(('0.0.0.0', COMMUNICATION_PORT))
             self.server_socket.listen(5)
             logger.info(f"Encrypted communication server listening on port {COMMUNICATION_PORT}")
 
             while self.running:
                 try:
                     client_socket, address = self.server_socket.accept()
+                    print('excepted n')
                     with self.threads_lock:
                         if len(self.connection_threads) >= 50:
                             logger.warning(
@@ -1763,7 +1764,7 @@ if __name__ == "__main__":
         if create_ssl_certificate():
             logger.info("Starting encrypted HTTPS server")
 
-            with socketserver.TCPServer(("", HTTPS_PORT), ParentHandler) as httpd:
+            with socketserver.TCPServer(("0.0.0.0", HTTPS_PORT), ParentHandler) as httpd:
                 try:
                     # SSL setup
                     context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)

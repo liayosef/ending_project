@@ -1,3 +1,4 @@
+
 import subprocess
 import socket
 import psutil
@@ -100,10 +101,10 @@ class ChildVPNDNSProtection:
                             result["vpn_processes_found"] = True
 
                 except (psutil.NoSuchProcess, psutil.AccessDenied, AttributeError):
-                    # הוסף AttributeError לטיפול בשדות None
+
                     continue
                 except Exception as e:
-                    # תפוס שגיאות נוספות
+
                     logger.debug(f"Error checking process: {e}")
                     continue
 
