@@ -60,8 +60,8 @@ CHILD_NAME = None
 REAL_DNS_SERVER = "8.8.8.8"
 LISTEN_IP = "0.0.0.0"
 LISTEN_PORT = 53
-BLOCK_PAGE_IP = "127.0.0.1"
-PARENT_SERVER_IP = "192.168.1.111"
+PARENT_SERVER_IP = "127.0.0.1"
+BLOCK_PAGE_IP = PARENT_SERVER_IP
 BLOCKED_DOMAINS = set()
 ORIGINAL_DNS = None
 BLOCK_SERVER_PORT = None
@@ -507,7 +507,7 @@ def wait_for_registration():
     try:
         if servers_ready:
             if "HTTP:80" in servers_ready:
-                registration_url = "http://127.0.0.1"
+                registration_url = f"http://{PARENT_SERVER_IP}:80"
             else:
                 registration_url = "http://127.0.0.1"
                 logger.info("Opening browser with HTTP")
