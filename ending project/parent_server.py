@@ -714,6 +714,7 @@ class ParentServer(BaseManager):
             logger.info(f"Encrypted communication server listening on port {COMMUNICATION_PORT}")
 
             while self.running:
+                print("am running")
                 try:
                     client_socket, address = self.server_socket.accept()
                     print('excepted n')
