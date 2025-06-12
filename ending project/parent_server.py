@@ -360,14 +360,11 @@ class UserManager:
 
     def __init__(self):
         self.db = get_database()
-        # אין צורך בהצפנה נפרדת - הדאטהבייס עושה הכל
 
     def register_user(self, email, fullname, password):
-        # DatabaseManager כבר מבצע hashing וcצפנה
         return self.db.register_user(email, fullname, password)
 
     def validate_login(self, email, password):
-        # DatabaseManager כבר מבצע hashing ובדיקה
         return self.db.validate_login(email, password)
 
     def get_user_fullname(self, email):
@@ -510,7 +507,6 @@ class ParentServer(BaseManager):
             "actions_taken": security_result["actions_taken"]
         }
 
-        # שמור התראת אבטחה בדאטהבייס
         if self.db:
             try:
                 self.db.add_security_alert(
@@ -524,15 +520,11 @@ class ParentServer(BaseManager):
                 logger.error(f"Error saving security alert: {e}")
 
         logger.critical(f" SECURITY ALERT LOGGED: {alert_data}")
-
-        # שלח התראה מיידית לממשק האינטרנט (אם יש חיבור פעיל)
         self._broadcast_security_alert(alert_data)
 
     def _broadcast_security_alert(self, alert_data):
         """Broadcast security alert to web interface"""
         try:
-            # זה יכול להיות דרך WebSocket או polling
-            # לעת עתה רק נתעד ב-log
             logger.info(f"Broadcasting security alert to web interface")
         except Exception as e:
             logger.error(f"Failed to broadcast security alert: {e}")
@@ -546,8 +538,6 @@ class ParentServer(BaseManager):
             address (tuple): Client address (IP, port)
         """
         client_ip = address[0]
-
-        # בדיקת אבטחה לפני המשך
         security_result = self.vpn_dns_protection.check_client_security(client_ip)
 
         if security_result["overall_risk"] == "high":

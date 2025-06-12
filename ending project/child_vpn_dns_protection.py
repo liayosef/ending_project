@@ -1,4 +1,3 @@
-
 import subprocess
 import socket
 import psutil
@@ -291,11 +290,11 @@ class ChildVPNDNSProtection:
                             parts = line.split(':')
                             if len(parts) > 1:
                                 dns_ip = parts[-1].strip()
+                                print(self._is_valid_ip(dns_ip))
                                 if self._is_valid_ip(dns_ip):
                                     dns_servers.append(dns_ip)
                 except Exception as e:
                     logger.debug(f"nslookup method failed: {e}")
-                    # תחלוף: נסה עם PowerShell
                     try:
                         result = subprocess.run([
                             'powershell', '-Command',
@@ -358,13 +357,11 @@ class ChildVPNDNSProtection:
         except Exception as e:
             logger.error(f"DNS detection error: {e}")
 
-        # אם לא מצאנו DNS, השתמש בברירת מחדל
         if not dns_servers:
             logger.info("No DNS servers detected, using defaults")
-            dns_servers = ["8.8.8.8"]  # ברירת מחדל
+            dns_servers = ["8.8.8.8"]
 
         return list(set(dns_servers))
-
 
     def _is_valid_ip(self, ip_str: str) -> bool:
         """Check if string is valid IP address"""
