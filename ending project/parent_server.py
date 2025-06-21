@@ -1165,7 +1165,6 @@ class ParentHandler(http.server.SimpleHTTPRequestHandler):
                     selected = 'selected' if child_name == child_filter else ''
                     children_options.append(f'<option value="{child_name}" {selected}>{child_name}</option>')
 
-            # ✅ קבל היסטוריה ישירות מדטבייס עם פילטרים
             try:
                 database = get_database()
                 filtered_history = database.get_browsing_history(

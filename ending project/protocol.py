@@ -18,7 +18,7 @@ class EncryptionManager:
     Encryption manager for communication - synchronized with parent system.
 
     Handles encryption and decryption of communication data between parent and child
-    systems using Fernet (AES 128-bit + HMAC) encryption.
+    systems using Fernet
     """
 
     def __init__(self, key_file="communication_key.key"):
