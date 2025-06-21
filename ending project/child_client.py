@@ -1485,9 +1485,8 @@ def handle_dns_request(data, addr, sock):
 
                 try:
                     response_dns = DNS(response_data)
-                    # Set low TTL for regular responses too!
                     for answer in response_dns.an:
-                        answer.ttl = 0  # So browser won't remember the response
+                        answer.ttl = 0
                     sock.sendto(bytes(response_dns), addr)
                 except:
                     sock.sendto(response_data, addr)
